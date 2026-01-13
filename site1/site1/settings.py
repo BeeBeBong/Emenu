@@ -9,12 +9,9 @@ https://docs.djangoproject.com/en/6.0/topics/settings/
 For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
-
+#thư mục gốc của dự án
 from pathlib import Path
-
-# Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
-
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
@@ -24,7 +21,6 @@ SECRET_KEY = 'django-insecure-ih6wbo1z4h$n@+m8&ws&8-c9+96zw^*56g(f)1*u@4bn_jehfr
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
-
 
 # Application definition
 
@@ -37,6 +33,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'EMENU',
     'rest_framework',
+    'rest_framework_simplejwt',
     'corsheaders',
 ]
 
@@ -70,7 +67,6 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'site1.wsgi.application'
 
-
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
@@ -82,20 +78,10 @@ DATABASES = {
         "USER": "root",
         "PASSWORD": "",
         "HOST": "127.0.0.1",
-        "PORT": "3306",  # Đổi port này nếu MySQL chạy ở port khác
-        "OPTIONS": {
-            'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
-        },
+        "PORT": "3306",
     }
 }
 
-# Nếu muốn dùng SQLite, uncomment phần dưới đây:
-# DATABASES = {
-#     'default': {
-#         'ENGINE': 'django.db.backends.sqlite3',
-#         'NAME': BASE_DIR / 'db.sqlite3',
-#     }
-# }
 
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
@@ -119,13 +105,13 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/6.0/topics/i18n/
 
-LANGUAGE_CODE = 'en-us'
+LANGUAGE_CODE = 'vi'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Asia/Ho_Chi_Minh'
 
 USE_I18N = True
 
-USE_TZ = True
+USE_TZ = False
 
 
 # Static files (CSS, JavaScript, Images)
@@ -151,7 +137,7 @@ CORS_ALLOWED_ORIGINS = [
 
 # Hoặc cho phép tất cả (chỉ dùng khi development)
 # Nếu muốn chỉ cho phép các origin cụ thể, set CORS_ALLOW_ALL_ORIGINS = False
-CORS_ALLOW_ALL_ORIGINS = True  # Tạm thời bật để dễ test, có thể tắt và chỉ dùng CORS_ALLOWED_ORIGINS
+CORS_ALLOW_ALL_ORIGINS = False  # Tạm thời bật để dễ test, có thể tắt và chỉ dùng CORS_ALLOWED_ORIGINS
 
 # Cho phép credentials
 CORS_ALLOW_CREDENTIALS = True
@@ -167,6 +153,7 @@ CORS_ALLOW_HEADERS = [
     'user-agent',
     'x-csrftoken',
     'x-requested-with',
+    'ngrok-skip-browser-warning',
 ]
 
 # CORS methods được phép
@@ -193,6 +180,9 @@ CSRF_TRUSTED_ORIGINS = [
 ]
 
 REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.AllowAny',  # Cho phép truy cập không cần auth
     ],

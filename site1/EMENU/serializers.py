@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Category, Item, Table, Order, OrderItem, Payment
+from .models import Category, Item, Table, Order, OrderItem, Revenue
 
 class CategorySerializer(serializers.ModelSerializer):
     class Meta:
@@ -101,13 +101,13 @@ class OrderSerializer(serializers.ModelSerializer):
             'items': data.get('items', [])
         }
 
-class PaymentSerializer(serializers.ModelSerializer):
+class RevenueSerializer(serializers.ModelSerializer):
     orderId = serializers.IntegerField(source='order.id', read_only=True)
     paidAt = serializers.DateTimeField(source='paid_at', read_only=True)
     
     class Meta:
-        model = Payment
-        fields = ['id', 'orderId', 'method', 'paidAt']
+        model = Revenue
+        fields = ['id', 'orderId', 'method', 'amount', 'paidAt']
     
     def to_representation(self, instance):
         data = super().to_representation(instance)
@@ -115,5 +115,10 @@ class PaymentSerializer(serializers.ModelSerializer):
             'id': data['id'],
             'orderId': data['orderId'],
             'method': data['method'],
+            'amount': data['amount'],
             'paidAt': data['paidAt']
         }
+
+class LoginSerializer(serializers.Serializer):
+    username = serializers.CharField(max_length=150)
+    password = serializers.CharField(write_only=True)

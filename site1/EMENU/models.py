@@ -1,6 +1,8 @@
 from django.db import models
 from django.utils import timezone
 from datetime import timedelta
+from django.db.models import Sum, Count, F
+from django.db.models.functions import Coalesce
 
 # 1. CATEGORIES - Danh mục món ăn
 class Category(models.Model):
@@ -113,8 +115,8 @@ class OrderItem(models.Model):
     def __str__(self):
         return f"{self.order} - {self.item.name} x{self.quantity}"
 
-# 6. PAYMENTS - Thanh toán
-class Payment(models.Model):
+# 6. REVENUE - Doanh thu
+class Revenue(models.Model):
     METHOD_CHOICES = [
         ('cash', 'Tiền mặt'),
         ('card', 'Thẻ'),
@@ -124,14 +126,40 @@ class Payment(models.Model):
     ]
     
     id = models.AutoField(primary_key=True, db_column='id_tt')
-    order = models.ForeignKey(Order, on_delete=models.CASCADE, db_column='id_donhang', related_name='payments')
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, db_column='id_donhang', related_name='revenues')
     method = models.CharField(max_length=20, choices=METHOD_CHOICES, db_column='phuong_thuc')
+    amount = models.IntegerField(default=0, db_column='so_tien')  # Doanh thu (VND)
     paid_at = models.DateTimeField(auto_now_add=True, db_column='thoi_gian_tt')
     
     class Meta:
-        db_table = 'payments'
-        verbose_name = 'Thanh toán'
-        verbose_name_plural = 'Thanh toán'
+        db_table = 'revenues'
+        verbose_name = 'Doanh thu'
+        verbose_name_plural = 'Doanh thu'
     
     def __str__(self):
-        return f"Thanh toán #{self.id} - Đơn #{self.order.id}"
+        return f"Doanh thu #{self.id} - Đơn #{self.order.id}"
+    
+    # 7. BOOKINGS - Yêu cầu đặt bàn
+class Booking(models.Model):
+    # Chỉ có 2 trạng thái: Chờ xử lý (Pending) và Đã xác nhận (Confirmed)
+    STATUS_CHOICES = [
+        ('pending', 'Chờ xử lý'),   # Mặc định khi khách gửi
+        ('confirmed', 'Đã xác nhận'), # Khi admin đã gọi điện xong
+    ]
+    
+    id = models.AutoField(primary_key=True)
+    customer_name = models.CharField(max_length=100, db_column='ten_khach')
+    customer_phone = models.CharField(max_length=15, db_column='sdt')
+    booking_time = models.DateTimeField(db_column='thoi_gian_dat') # Thời gian khách muốn đến
+    guest_count = models.IntegerField(default=1, db_column='so_nguoi')
+    note = models.TextField(null=True, blank=True, db_column='ghi_chu')
+    
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', db_column='trang_thai')
+    created_at = models.DateTimeField(auto_now_add=True) # Thời điểm gửi yêu cầu
+
+    class Meta:
+        db_table = 'bookings'
+        ordering = ['-created_at'] # Đưa yêu cầu mới nhất lên đầu để Admin dễ thấy
+
+    def __str__(self):
+        return f"{self.customer_name} - {self.customer_phone} ({self.status})"
