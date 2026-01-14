@@ -173,7 +173,7 @@ def create_order(request):
     try:
         data = request.data
         
-        # Lấy thông tin bàn
+        # 1. Lấy thông tin bàn
         table_id = data.get('tableId')
         if not table_id:
             return Response({'error': 'Thiếu thông tin bàn (tableId)'}, status=status.HTTP_400_BAD_REQUEST)
@@ -196,12 +196,12 @@ def create_order(request):
                 'detail': f'Không tìm thấy bàn với ID: {table_id}. Vui lòng kiểm tra lại hoặc lấy danh sách bàn từ GET /api/tables/'
             }, status=status.HTTP_404_NOT_FOUND)
         
-        # Lấy danh sách món ăn
+        # 2. Lấy danh sách món ăn
         items_data = data.get('items', [])
         if not items_data:
             return Response({'error': 'Danh sách món ăn không được để trống'}, status=status.HTTP_400_BAD_REQUEST)
         
-        # Tính tổng tiền
+        # 3. Tính tổng tiền
         total = 0
         for item_data in items_data:
             item_id = item_data.get('itemId') or item_data.get('id_mon')
@@ -243,14 +243,19 @@ def create_order(request):
             
             total += item.price * quantity
         
-        # Tạo đơn hàng
+        # 4. Tạo đơn hàng (Order)
         order = Order.objects.create(
             table=table,
             total=total,
             status='pending'
         )
+
+        # 👇 [QUAN TRỌNG] CẬP NHẬT TRẠNG THÁI BÀN NGAY TẠI ĐÂY 👇
+        table.status = 'occupied'  # Chuyển sang màu vàng (đang có khách)
+        table.save()               # Lưu lại vào database
+        # 👆 -------------------------------------------------- 👆
         
-        # Tạo chi tiết đơn hàng
+        # 5. Tạo chi tiết đơn hàng (OrderItem)
         for item_data in items_data:
             item_id = item_data.get('itemId') or item_data.get('id_mon')
             quantity = item_data.get('quantity', 1)
@@ -410,7 +415,7 @@ def get_dashboard_stats(request):
 
     # --- B. REVENUE (Doanh thu) ---
     # Lọc doanh thu theo ngày
-    revenue_qs = Revenue.objects.filter(date__date__range=[start_date, end_date])
+    revenue_qs = Revenue.objects.filter(paid_at__date__range=[start_date, end_date])
     
     total_revenue = revenue_qs.aggregate(total=Coalesce(Sum('amount'), 0))['total']
     cash_revenue = revenue_qs.filter(method='cash').aggregate(total=Coalesce(Sum('amount'), 0))['total']
@@ -518,9 +523,9 @@ def checkout(request, table_id):
 
         # 3. Lưu Doanh Thu (Quan trọng để hiện số liệu Dashboard)
         Revenue.objects.create(
-            amount=total_amount,
-            method=request.data.get('method', 'cash'), # Mặc định là tiền mặt
-            date=timezone.now()
+        amount=total_amount,
+        method=request.data.get('method', 'cash'),
+        paid_at=timezone.now() # <--- ĐÚNG TÊN LÀ paid_at
         )
 
         # 4. Cập nhật trạng thái Đơn hàng -> Hoàn thành

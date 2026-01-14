@@ -53,4 +53,7 @@ urlpatterns = [
     path('api/tables/<int:id_ban>/reserve/', reserve_table, name='reserve_table'),
     path('api/tables/<int:table_id>/checkout/', views.checkout, name='checkout'),
     path('api/orders/table/<int:table_id>/', views.get_order_by_table, name='get_order_by_table'),
+
+    # Revenue API (CẬP NHẬT: Xoá API này vì đã gộp vào dashboard stats)
+    path('api/booking/delete/<int:pk>/', views.delete_booking, name='delete_booking'),
 ]
