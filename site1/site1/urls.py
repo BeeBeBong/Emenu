@@ -12,6 +12,7 @@ from EMENU.views import (
     create_booking, get_dashboard_stats 
 )
 from EMENU.views import get_Emenu
+from EMENU import views
 
 # Router cho ViewSets
 router = DefaultRouter()
@@ -30,7 +31,9 @@ urlpatterns = [
     
     # --- CẬP NHẬT MỚI: Thay api/revenue cũ bằng api dashboard mới ---
     # API này trả về cả Doanh thu + Booking + Best Seller
-    path('api/dashboard/stats/', get_dashboard_stats, name='get_dashboard_stats'), 
+    path('api/dashboard/stats/', get_dashboard_stats, name='get_dashboard_stats'),
+    path('api/booking/delete/<int:pk>/', views.delete_booking, name='delete_booking'),
+
     
     # --- CẬP NHẬT MỚI: API cho khách đặt bàn ---
     path('api/booking/create/', create_booking, name='create_booking'),

@@ -1,5 +1,34 @@
 from rest_framework import serializers
+from django.contrib.auth.models import User  # <--- Import thêm model User
 from .models import Category, Item, Table, Order, OrderItem, Revenue
+
+# ========== USER SERIALIZER (MỚI THÊM) ==========
+class UserSerializer(serializers.ModelSerializer):
+    """
+    Serializer này giúp lọc dữ liệu User gọn gàng để trả về cho Frontend.
+    Chỉ lấy: id, username, name (tên hiển thị), role (vai trò).
+    Bỏ qua: password, email, last_login, date_joined...
+    """
+    role = serializers.SerializerMethodField()
+    name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'name', 'role'] # Chỉ gửi 4 trường này
+
+    def get_role(self, obj):
+        # Tự động xác định vai trò dựa trên cờ is_superuser/is_staff
+        if obj.is_superuser:
+            return 'ADMIN'
+        if obj.is_staff:
+            return 'STAFF'
+        return 'CUSTOMER'
+
+    def get_name(self, obj):
+        # Ưu tiên lấy Tên thật (First Name), nếu không có thì lấy Username
+        return obj.first_name if obj.first_name else obj.username
+
+# ========== CÁC SERIALIZER CŨ (GIỮ NGUYÊN) ==========
 
 class CategorySerializer(serializers.ModelSerializer):
     class Meta:
@@ -22,7 +51,6 @@ class ItemSerializer(serializers.ModelSerializer):
     
     def to_representation(self, instance):
         data = super().to_representation(instance)
-        # Xử lý URL hình ảnh nếu có
         img_url = ''
         if instance.image:
             request = self.context.get('request')

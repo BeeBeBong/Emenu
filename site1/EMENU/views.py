@@ -6,7 +6,8 @@ from django.shortcuts import render
 from .models import Category, Item, Table, Order, OrderItem, Revenue, Booking
 from .serializers import (
     CategorySerializer, ItemSerializer, TableSerializer,
-    OrderSerializer, OrderItemSerializer, RevenueSerializer, LoginSerializer
+    OrderSerializer, OrderItemSerializer, RevenueSerializer, 
+    LoginSerializer, UserSerializer 
 )
 from rest_framework import status
 from django.shortcuts import get_object_or_404
@@ -22,6 +23,11 @@ from django.db.models.functions import Coalesce
 from datetime import date
 from rest_framework.permissions import AllowAny, IsAdminUser
 from django.views.decorators.csrf import csrf_exempt
+from django.utils import timezone
+from datetime import timedelta
+from rest_framework.decorators import authentication_classes, permission_classes
+from rest_framework.permissions import AllowAny
+from django.views.decorators.csrf import csrf_exempt
 
 
 # ========== Template View ==========
@@ -32,116 +38,77 @@ def get_Emenu(request):
 # ========== AUTH APIs ==========
 @api_view(['POST'])
 def login(request):
-    """Dang nhap va lay token"""
+    """Đăng nhập và trả về đúng định dạng Frontend yêu cầu (userId, fullName)"""
     serializer = LoginSerializer(data=request.data)
+    
     if serializer.is_valid():
         username = serializer.validated_data['username']
         password = serializer.validated_data['password']
         
         user = authenticate(username=username, password=password)
+        
         if user is not None:
             refresh = RefreshToken.for_user(user)
+            
+            # Lấy tên hiển thị (nếu không có tên thật thì dùng username)
+            display_name = user.first_name if user.first_name else user.username
+            
+            # Xác định role
+            role = 'CUSTOMER'
+            if user.is_superuser:
+                role = 'ADMIN'
+            elif user.is_staff:
+                role = 'STAFF'
+
+            # --- TRẢ VỀ JSON KHỚP 100% VỚI FRONTEND CŨ ---
             return Response({
                 'status': 'success',
-                'message': 'Dang nhap thanh cong',
+                'message': 'Đăng nhập thành công',
                 'data': {
                     'token': str(refresh.access_token),
-                    'userId': user.id,
-                    'fullName': user.get_full_name() or user.username,
-                    'role': 'ADMIN' if user.is_superuser else ('STAFF' if user.is_staff else 'CUSTOMER')
+                    'userId': user.id,       # Giữ nguyên là userId
+                    'fullName': display_name, # Giữ nguyên là fullName
+                    'role': role
                 }
             }, status=status.HTTP_200_OK)
         else:
             return Response({
                 'status': 'error',
-                'message': 'Sai username hoac password'
+                'message': 'Sai username hoặc password'
             }, status=status.HTTP_401_UNAUTHORIZED)
     else:
         return Response({
             'status': 'error',
-            'message': 'Thong tin dang nhap khong hop le',
+            'message': 'Thông tin đăng nhập không hợp lệ',
             'errors': serializer.errors
         }, status=status.HTTP_400_BAD_REQUEST)
 
 @api_view(['GET'])
 def get_current_user(request):
-    """Lay thong tin user hien tai (role/permission)"""
+    """Lấy thông tin user hiện tại (Đã đồng bộ tên biến với Login)"""
     if request.user.is_authenticated:
+        # Xác định Role giống hệt hàm Login
+        role = 'ADMIN' if request.user.is_superuser else ('STAFF' if request.user.is_staff else 'CUSTOMER')
+        
+        # Lấy tên hiển thị ưu tiên
+        display_name = request.user.first_name if request.user.first_name else request.user.username
+
         return Response({
-            'id': request.user.id,
-            'username': request.user.username,
-            'email': request.user.email,
-            'is_admin': request.user.is_superuser,
-            'is_staff': request.user.is_staff,
-            'role': 'admin' if request.user.is_superuser else ('staff' if request.user.is_staff else 'customer')
+            'status': 'success',
+            'data': {
+                # --- PHẦN QUAN TRỌNG NHẤT: ĐỔI TÊN BIẾN ---
+                'userId': request.user.id,        # Đổi 'id' thành 'userId'
+                'fullName': display_name,         # Đổi 'username' thành 'fullName'
+                'role': role,                     # Gộp is_staff/superuser thành 'role'
+                'email': request.user.email
+            }
         }, status=status.HTTP_200_OK)
     else:
         return Response({
-            'error': 'Chua dang nhap'
+            'status': 'error',
+            'message': 'Chưa đăng nhập'
         }, status=status.HTTP_401_UNAUTHORIZED)
 
-@api_view(['GET'])
-def get_revenue(request):
-    """
-    API lấy dữ liệu cho Dashboard:
-    1. Tổng doanh thu, Tiền mặt, Tài khoản khác
-    2. Tổng số đơn hàng
-    3. Top món bán chạy (Best Seller)
-    """
-    # Kiểm tra quyền (giữ nguyên logic cũ của bạn)
-    if not request.user.is_staff:
-        return Response({
-            'error': 'Khong co quyen truy cap'
-        }, status=status.HTTP_403_FORBIDDEN)
-    
-    # --- PHẦN 1: TÍNH TOÁN DOANH THU ---
-    # Tính tổng doanh thu (dùng Coalesce để nếu không có đơn nào thì trả về 0 thay vì None)
-    total_revenue = Revenue.objects.aggregate(
-        total=Coalesce(Sum('amount'), 0)
-    )['total']
-    
-    # Tính riêng Tiền mặt (Cash)
-    cash_revenue = Revenue.objects.filter(method='cash').aggregate(
-        total=Coalesce(Sum('amount'), 0)
-    )['total']
-    
-    # Tính riêng Tài khoản khác (Banking, Momo, Card...) - Là tất cả trừ Cash
-    banking_revenue = Revenue.objects.exclude(method='cash').aggregate(
-        total=Coalesce(Sum('amount'), 0)
-    )['total']
-    
-    # --- PHẦN 2: ĐẾM SỐ ĐƠN HÀNG ---
-    total_orders = Order.objects.count()
-
-    # --- PHẦN 3: TÍNH BEST SELLER (MÓN BÁN CHẠY) ---
-    # Logic: Group by món ăn (Item) -> Sum số lượng từ bảng OrderItem -> Sắp xếp giảm dần
-    best_sellers_query = Item.objects.annotate(
-        total_sold=Coalesce(Sum('order_items__quantity'), 0) # Cộng dồn số lượng đã bán
-    ).filter(total_sold__gt=0).order_by('-total_sold')[:5]   # Lấy top 5 món bán > 0
-
-    # Format dữ liệu Best Seller để gửi về Frontend
-    best_sellers_data = []
-    for item in best_sellers_query:
-        # Xử lý ảnh: nếu không có ảnh thì để chuỗi rỗng hoặc link ảnh mặc định
-        img_url = request.build_absolute_uri(item.image.url) if item.image else ''
-        
-        best_sellers_data.append({
-            'name': item.name,
-            'price': item.price,
-            'sold_count': item.total_sold, # Số lượng đã bán (hiện màu đỏ trong hình)
-            'image': img_url
-        })
-
-    # --- TRẢ VỀ KẾT QUẢ ---
-    return Response({
-        'dashboard': {
-            'total_revenue': total_revenue,   # Tổng doanh thu
-            'cash_revenue': cash_revenue,     # Tiền mặt
-            'banking_revenue': banking_revenue, # Tài khoản khác
-            'total_orders': total_orders,     # Tổng đơn hàng
-        },
-        'best_sellers': best_sellers_data     # Danh sách món bán chạy
-    }, status=status.HTTP_200_OK)
 
 # ========== CATEGORY APIs ==========
 class CategoryViewSet(viewsets.ModelViewSet):
@@ -495,3 +462,53 @@ def get_dashboard_stats(request):
         'bookings': bookings_data, # Dữ liệu khớp với biến BOOKINGS ở frontend
         'best_sellers': best_sellers_data
     }, status=status.HTTP_200_OK)
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAdminUser]) # Chỉ Admin mới được xóa
+def delete_booking(request, pk):
+    try:
+        booking = Booking.objects.get(pk=pk)
+        booking.delete()
+        return Response({'success': True, 'message': 'Đã xóa thành công'}, status=status.HTTP_200_OK)
+    except Booking.DoesNotExist:
+        return Response({'error': 'Không tìm thấy đơn này'}, status=status.HTTP_404_NOT_FOUND)
+    
+@api_view(['POST'])
+@permission_classes([AllowAny])      # Ai cũng được gọi
+@authentication_classes([])          # <--- QUAN TRỌNG: Tắt kiểm tra xác thực cho API này
+@csrf_exempt                         # Tắt bảo vệ CSRF (tránh lỗi 403 Forbidden)
+def login(request):
+    """Đăng nhập và lấy token"""
+    print("LOG: Đang nhận request login...") # Dòng này để in ra terminal xem request có đến nơi không
+    print("Data nhận được:", request.data)   # In ra xem Frontend gửi gì lên
+
+    serializer = LoginSerializer(data=request.data)
+    
+    if serializer.is_valid():
+        username = serializer.validated_data['username']
+        password = serializer.validated_data['password']
+        
+        user = authenticate(username=username, password=password)
+        
+        if user is not None:
+            refresh = RefreshToken.for_user(user)
+            display_name = user.first_name if user.first_name else user.username
+            role = 'ADMIN' if user.is_superuser else ('STAFF' if user.is_staff else 'CUSTOMER')
+
+            return Response({
+                'status': 'success',
+                'message': 'Đăng nhập thành công',
+                'data': {
+                    'token': str(refresh.access_token),
+                    'userId': user.id,
+                    'fullName': display_name,
+                    'role': role
+                }
+            }, status=status.HTTP_200_OK)
+        else:
+            print("LOG: Sai mật khẩu hoặc user không tồn tại")
+            return Response({'status': 'error', 'message': 'Sai username hoặc password'}, status=status.HTTP_401_UNAUTHORIZED)
+    else:
+        print("LOG: Serializer lỗi:", serializer.errors)
+        return Response({'status': 'error', 'message': 'Dữ liệu không hợp lệ', 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
