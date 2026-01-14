@@ -35,53 +35,6 @@ def get_Emenu(request):
     """Render template HTML cho eMenu"""
     return render(request, 'Emenu.html')
 
-# ========== AUTH APIs ==========
-@api_view(['POST'])
-def login(request):
-    """Đăng nhập và trả về đúng định dạng Frontend yêu cầu (userId, fullName)"""
-    serializer = LoginSerializer(data=request.data)
-    
-    if serializer.is_valid():
-        username = serializer.validated_data['username']
-        password = serializer.validated_data['password']
-        
-        user = authenticate(username=username, password=password)
-        
-        if user is not None:
-            refresh = RefreshToken.for_user(user)
-            
-            # Lấy tên hiển thị (nếu không có tên thật thì dùng username)
-            display_name = user.first_name if user.first_name else user.username
-            
-            # Xác định role
-            role = 'CUSTOMER'
-            if user.is_superuser:
-                role = 'ADMIN'
-            elif user.is_staff:
-                role = 'STAFF'
-
-            # --- TRẢ VỀ JSON KHỚP 100% VỚI FRONTEND CŨ ---
-            return Response({
-                'status': 'success',
-                'message': 'Đăng nhập thành công',
-                'data': {
-                    'token': str(refresh.access_token),
-                    'userId': user.id,       # Giữ nguyên là userId
-                    'fullName': display_name, # Giữ nguyên là fullName
-                    'role': role
-                }
-            }, status=status.HTTP_200_OK)
-        else:
-            return Response({
-                'status': 'error',
-                'message': 'Sai username hoặc password'
-            }, status=status.HTTP_401_UNAUTHORIZED)
-    else:
-        return Response({
-            'status': 'error',
-            'message': 'Thông tin đăng nhập không hợp lệ',
-            'errors': serializer.errors
-        }, status=status.HTTP_400_BAD_REQUEST)
 
 @api_view(['GET'])
 def get_current_user(request):
@@ -390,54 +343,83 @@ def create_booking(request):
 @api_view(['GET'])
 def get_dashboard_stats(request):
     """
-    API tổng hợp dữ liệu Dashboard:
-    1. Revenue (Doanh thu)
-    2. Best Sellers
-    3. Bookings (Danh sách chờ xử lý cho Admin)
+    API Dashboard xử lý lọc theo range: 
+    ?range=today (default) | yesterday | week | month | quarter | year
     """
-    # Chỉ Staff/Admin mới xem được
-    if not request.user.is_staff:
-        return Response({'error': 'Unauthorized'}, status=status.HTTP_403_FORBIDDEN)
-
-    # 1. TÍNH DOANH THU (Code cũ - giữ nguyên)
-    total_revenue = Revenue.objects.aggregate(total=Coalesce(Sum('amount'), 0))['total']
-    cash_revenue = Revenue.objects.filter(method='cash').aggregate(total=Coalesce(Sum('amount'), 0))['total']
-    transfer_revenue = Revenue.objects.exclude(method='cash').aggregate(total=Coalesce(Sum('amount'), 0))['total']
-    total_orders = Order.objects.count()
-
-    # 2. LẤY LIST BOOKING (Mới cập nhật)
-    # Lấy các booking sắp tới (tính từ hôm nay) để Admin gọi điện
-    today = date.today()
+    # 1. Lấy tham số range từ URL (Mặc định là today)
+    range_type = request.query_params.get('range', 'today')
     
-    # Lấy cả 'pending' (để xử lý) và 'confirmed' (để theo dõi)
+    # 2. Tính toán ngày bắt đầu (start_date) và kết thúc (end_date)
+    today = timezone.now().date()
+    start_date = today
+    end_date = today
+
+    if range_type == 'yesterday':
+        start_date = today - timedelta(days=1)
+        end_date = start_date
+    elif range_type == 'week':
+        # Tuần này (Thứ 2 -> Hôm nay)
+        start_date = today - timedelta(days=today.weekday())
+        end_date = today
+    elif range_type == 'month':
+        # Tháng này (Ngày 1 -> Hôm nay)
+        start_date = today.replace(day=1)
+        end_date = today
+    elif range_type == 'quarter':
+        # Quý này: (Tháng 1-3 -> Q1, 4-6 -> Q2...)
+        quarter = (today.month - 1) // 3 + 1
+        start_month = 3 * (quarter - 1) + 1
+        start_date = today.replace(month=start_month, day=1)
+        end_date = today
+    elif range_type == 'year':
+        # Năm nay
+        start_date = today.replace(month=1, day=1)
+        end_date = today
+
+    # 3. Truy vấn dữ liệu theo khoảng thời gian (start_date -> end_date)
+    
+    # --- A. BOOKING (Lịch đặt bàn) ---
+    # Lọc các đơn nằm trong khoảng thời gian đã chọn (cả quá khứ và tương lai)
     bookings_query = Booking.objects.filter(
-        booking_time__date__gte=today
-    ).order_by('booking_time') # Sắp xếp theo giờ ăn sắp đến
+        booking_time__date__range=[start_date, end_date]
+    ).order_by('booking_time')
     
     bookings_data = []
     for b in bookings_query:
+        # Xử lý format ngày giờ an toàn
         try:
-            # Nếu field là DateTimeField
-            local_time = localtime(b.booking_time)
-            formatted_date = local_time.strftime('%Y-%m-%d') # Sẽ ra đúng ngày
-            formatted_time = local_time.strftime('%H:%M')    # Sẽ ra đúng giờ
+            if timezone.is_aware(b.booking_time):
+                local_time = timezone.localtime(b.booking_time)
+            else:
+                local_time = b.booking_time
+            formatted_date = local_time.strftime('%Y-%m-%d')
+            formatted_time = local_time.strftime('%H:%M')
         except:
-            # Nếu field là CharField (lưu dạng chuỗi) thì giữ nguyên hoặc cắt chuỗi
-            # Tùy vào cách bạn lưu lúc khách đặt. 
-            # Tốt nhất là lưu DateTimeField để dùng hàm trên.
             formatted_date = str(b.booking_time).split(' ')[0]
             formatted_time = str(b.booking_time).split(' ')[1] if ' ' in str(b.booking_time) else ''
+
         bookings_data.append({
             "id": b.id,
-            "name": b.customer_name,      # Map với: name
-            "phone": b.customer_phone,    # Map với: phone
-            "time": formatted_time,       # Map với: time ("18:30")
-            "date": formatted_date,       # Map với: date ("2026-01-14")
-            "guests": b.guest_count,      # Map với: guests
-            "status": b.status            # Map với: status ("pending"/"confirmed")
+            "name": b.customer_name,
+            "phone": b.customer_phone,
+            "time": formatted_time,
+            "date": formatted_date,
+            "guests": b.guest_count,
+            "status": b.status
         })
 
-    # 3. BEST SELLERS (Code cũ - giữ nguyên)
+    # --- B. REVENUE (Doanh thu) ---
+    # Lọc doanh thu theo ngày
+    revenue_qs = Revenue.objects.filter(date__date__range=[start_date, end_date])
+    
+    total_revenue = revenue_qs.aggregate(total=Coalesce(Sum('amount'), 0))['total']
+    cash_revenue = revenue_qs.filter(method='cash').aggregate(total=Coalesce(Sum('amount'), 0))['total']
+    transfer_revenue = revenue_qs.exclude(method='cash').aggregate(total=Coalesce(Sum('amount'), 0))['total']
+    
+    # Đếm số đơn đã thanh toán (Dựa trên bảng Doanh thu)
+    total_orders = revenue_qs.count()
+
+    # --- C. BEST SELLERS (Giữ nguyên logic cũ) ---
     best_sellers_query = Item.objects.annotate(
         total_sold=Coalesce(Sum('order_items__quantity'), 0)
     ).filter(total_sold__gt=0).order_by('-total_sold')[:5]
@@ -453,13 +435,14 @@ def get_dashboard_stats(request):
         })
 
     return Response({
+        'filter': range_type,
         'revenue': {
             'total': total_revenue,
             'cash': cash_revenue,
             'transfer': transfer_revenue,
             'orders': total_orders
         },
-        'bookings': bookings_data, # Dữ liệu khớp với biến BOOKINGS ở frontend
+        'bookings': bookings_data,
         'best_sellers': best_sellers_data
     }, status=status.HTTP_200_OK)
 
@@ -512,3 +495,72 @@ def login(request):
     else:
         print("LOG: Serializer lỗi:", serializer.errors)
         return Response({'status': 'error', 'message': 'Dữ liệu không hợp lệ', 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['POST'])
+def checkout(request, table_id):
+    """
+    API Thanh toán:
+    1. Tìm đơn hàng chờ của bàn đó.
+    2. Lưu doanh thu (Revenue) để hiện lên Dashboard.
+    3. Chốt đơn hàng (status='completed').
+    4. Trả bàn về trạng thái Trống (available).
+    """
+    try:
+        # 1. Tìm bàn và đơn hàng chưa thanh toán
+        table = Table.objects.get(pk=table_id)
+        order = Order.objects.filter(table=table, status='pending').first()
+        
+        if not order:
+            return Response({'error': 'Bàn này không có đơn nào chưa thanh toán'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 2. Tính tổng tiền
+        total_amount = order.total
+
+        # 3. Lưu Doanh Thu (Quan trọng để hiện số liệu Dashboard)
+        Revenue.objects.create(
+            amount=total_amount,
+            method=request.data.get('method', 'cash'), # Mặc định là tiền mặt
+            date=timezone.now()
+        )
+
+        # 4. Cập nhật trạng thái Đơn hàng -> Hoàn thành
+        order.status = 'completed'
+        order.save()
+
+        # 5. Cập nhật trạng thái Bàn -> Trống (Màu trắng)
+        table.status = 'available' 
+        table.reserved_at = None
+        table.expires_at = None
+        table.save()
+
+        return Response({'success': True, 'message': 'Thanh toán thành công!'}, status=status.HTTP_200_OK)
+
+    except Table.DoesNotExist:
+        return Response({'error': 'Bàn không tồn tại'}, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET'])
+def get_order_by_table(request, table_id):
+    """
+    API lấy đơn hàng đang chờ (pending) của một bàn cụ thể.
+    Dùng khi bấm vào một bàn trên màn hình POS.
+    """
+    try:
+        # Tìm đơn hàng chưa thanh toán của bàn này
+        order = Order.objects.filter(table_id=table_id, status='pending').first()
+        
+        if order:
+            serializer = OrderSerializer(order)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        else:
+            # Quan trọng: Nếu bàn trống (chưa có đơn), trả về rỗng chứ đừng báo lỗi
+            # Để Frontend biết đường mà reset giỏ hàng về 0
+            return Response({
+                'id': None, 
+                'items': [], 
+                'total': 0
+            }, status=status.HTTP_200_OK)
+            
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

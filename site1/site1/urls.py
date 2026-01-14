@@ -51,4 +51,6 @@ urlpatterns = [
     
     # Table APIs
     path('api/tables/<int:id_ban>/reserve/', reserve_table, name='reserve_table'),
+    path('api/tables/<int:table_id>/checkout/', views.checkout, name='checkout'),
+    path('api/orders/table/<int:table_id>/', views.get_order_by_table, name='get_order_by_table'),
 ]
