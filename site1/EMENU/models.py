@@ -163,3 +163,9 @@ class Booking(models.Model):
 
     def __str__(self):
         return f"{self.customer_name} - {self.customer_phone} ({self.status})"
+
+class Notification(models.Model):
+    table = models.ForeignKey(Table, on_delete=models.CASCADE, null=True)
+    message = models.CharField(max_length=255) # Vẫn giữ để Admin đọc chi tiết nếu cần
+    created_at = models.DateTimeField(auto_now_add=True)
+    is_read = models.BooleanField(default=False)

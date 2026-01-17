@@ -3,12 +3,15 @@ URL configuration for site1 project.
 """
 from django.contrib import admin
 from django.urls import path, include
+# 👇 1. THÊM 2 DÒNG NÀY ĐỂ CẤU HÌNH MEDIA
+from django.conf import settings
+from django.conf.urls.static import static
+
 from rest_framework.routers import DefaultRouter
 from EMENU.views import (
     CategoryViewSet, ItemViewSet, TableViewSet, OrderViewSet,
     get_menu, get_menu_data, get_menu_by_category, reserve_table, create_order,
     get_current_user, login, 
-    # --- CẬP NHẬT MỚI: Import thêm 2 views này ---
     create_booking, get_dashboard_stats 
 )
 from EMENU.views import get_Emenu
@@ -29,17 +32,18 @@ urlpatterns = [
     path('login/', login, name='login'),
     path('api/auth/me/', get_current_user, name='get_current_user'),
     
-    # --- CẬP NHẬT MỚI: Thay api/revenue cũ bằng api dashboard mới ---
-    # API này trả về cả Doanh thu + Booking + Best Seller
+    # Dashboard API
     path('api/dashboard/stats/', get_dashboard_stats, name='get_dashboard_stats'),
     path('api/booking/delete/<int:pk>/', views.delete_booking, name='delete_booking'),
 
-    
-    # --- CẬP NHẬT MỚI: API cho khách đặt bàn ---
+    # Booking API
     path('api/booking/create/', create_booking, name='create_booking'),
 
     # Order APIs
     path('api/orders/create/', create_order, name='create_order'),
+    path('api/orders/cancel/', views.cancel_order, name='cancel_order'),
+    path('api/tables/request-payment/', views.request_payment, name='request_payment'),
+    path('api/notifications/', views.get_notifications, name='get_notifications'),
     
     # API endpoints từ Router
     path('api/', include(router.urls)),
@@ -53,7 +57,9 @@ urlpatterns = [
     path('api/tables/<int:id_ban>/reserve/', reserve_table, name='reserve_table'),
     path('api/tables/<int:table_id>/checkout/', views.checkout, name='checkout'),
     path('api/orders/table/<int:table_id>/', views.get_order_by_table, name='get_order_by_table'),
-
-    # Revenue API (CẬP NHẬT: Xoá API này vì đã gộp vào dashboard stats)
-    path('api/booking/delete/<int:pk>/', views.delete_booking, name='delete_booking'),
 ]
+
+# 👇 2. ĐOẠN QUAN TRỌNG NHẤT: MỞ KHO ẢNH
+# Nếu đang chạy DEBUG (Runserver) thì cho phép truy cập link /media/...
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
