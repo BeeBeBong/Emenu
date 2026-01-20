@@ -25,27 +25,27 @@ class LoginSerializer(serializers.Serializer):
     password = serializers.CharField(write_only=True)
 
 # ==========================================
-# 2. CATEGORY & ITEM (QUAN TRỌNG)
+# 2. CATEGORY & ITEM (ĐÃ SỬA HIỂN THỊ TÊN NHÓM)
 # ==========================================
 class CategorySerializer(serializers.ModelSerializer):
     class Meta:
         model = Category
         fields = ['id', 'name']
 
-# --- A. Serializer để XEM (Dành cho Menu Khách & Danh sách Admin) ---
-# Dùng Base64 để đảm bảo ảnh luôn hiện, không bị lỗi link Ngrok/Localhost
+# --- A. Serializer để XEM (Dành cho Menu Khách & Admin) ---
 class ItemSerializer(serializers.ModelSerializer):
-    # SỬA: Dùng MethodField để tự xử lý nếu Category bị Null (tránh lỗi màn hình trắng)
-    categoryName = serializers.SerializerMethodField()
+    # 👇 SỬA TẠI ĐÂY: Đổi 'categoryName' thành 'category_name' cho khớp Frontend
+    category_name = serializers.SerializerMethodField()
     img = serializers.SerializerMethodField() 
 
     class Meta:
         model = Item
-        fields = ['id', 'name', 'price', 'categoryName', 'img', 'category']
+        # Thêm 'category_name' vào fields để Frontend đọc được
+        fields = ['id', 'name', 'price', 'category_name', 'img', 'category']
 
-    def get_categoryName(self, obj):
+    def get_category_name(self, obj):
+        # Hàm này chuyển ID (số) thành Tên (chữ)
         try:
-            # Nếu có category thì lấy tên, nếu không có (bị xóa nhầm) thì hiện "Khác"
             if obj.category:
                 return obj.category.name
             return "Khác"
@@ -54,26 +54,23 @@ class ItemSerializer(serializers.ModelSerializer):
 
     def get_img(self, obj):
         try:
-            # Logic "Bất tử ảnh": File thật -> Base64 -> Ảnh mẫu
+            # Logic "Bất tử ảnh": File thật -> Base64
             if obj.image and hasattr(obj.image, 'path') and os.path.exists(obj.image.path):
                 with open(obj.image.path, "rb") as image_file:
                     encoded = base64.b64encode(image_file.read()).decode('utf-8')
                     return f"data:image/jpeg;base64,{encoded}"
-            
-            # Nếu không đọc được file, trả về ảnh mẫu online
+            # Fallback ảnh mẫu
             return "https://images.unsplash.com/photo-1579871494447-9811cf80d66c?q=80&w=400"
         except Exception:
-            # Fallback cuối cùng nếu mọi thứ đều lỗi
-            return "https://via.placeholder.com/150"
-        
-# --- B. Serializer để THÊM/SỬA (Dành riêng cho Form Admin) ---
-# Dùng ảnh gốc để xử lý upload file
+            return ""
+
+# --- B. Serializer để THÊM/SỬA (Cho Form Admin) ---
 class ProductFormSerializer(serializers.ModelSerializer):
     class Meta:
         model = Item
         fields = ['id', 'name', 'price', 'category', 'image']
         extra_kwargs = {
-            'image': {'required': False}, # Khi sửa không bắt buộc chọn lại ảnh
+            'image': {'required': False},
             'category': {'required': True}
         }
 
@@ -93,7 +90,6 @@ class OrderItemSerializer(serializers.ModelSerializer):
         fields = ['id', 'itemId', 'name', 'price', 'quantity', 'note', 'isServed', 'image', 'img']
 
     def get_image_base64(self, obj):
-        # Dùng lại logic Base64 cho giỏ hàng
         try:
             if obj.item and obj.item.image and hasattr(obj.item.image, 'path') and os.path.exists(obj.item.image.path):
                 with open(obj.item.image.path, "rb") as f:
@@ -103,10 +99,8 @@ class OrderItemSerializer(serializers.ModelSerializer):
             pass
         return "https://images.unsplash.com/photo-1579871494447-9811cf80d66c?q=80&w=200"
 
-    def get_image(self, obj):
-        return self.get_image_base64(obj)
-    def get_img(self, obj):
-        return self.get_image_base64(obj)
+    def get_image(self, obj): return self.get_image_base64(obj)
+    def get_img(self, obj): return self.get_image_base64(obj)
 
 class OrderSerializer(serializers.ModelSerializer):
     tableId = serializers.IntegerField(source='table.id', read_only=True)
