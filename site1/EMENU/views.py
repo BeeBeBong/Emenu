@@ -8,6 +8,7 @@ from django.contrib.auth import authenticate
 from django.db.models import Sum
 from django.db.models.functions import Coalesce
 from django.views.decorators.csrf import csrf_exempt
+from django.contrib.auth.models import User
 
 from rest_framework import viewsets, status
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
@@ -15,11 +16,12 @@ from rest_framework.permissions import AllowAny, IsAdminUser
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 
+# Import Models & Serializers
 from .models import Category, Item, Table, Order, OrderItem, Revenue, Booking, Notification
 from .serializers import (
     CategorySerializer, ItemSerializer, TableSerializer,
     OrderSerializer, OrderItemSerializer, RevenueSerializer, 
-    LoginSerializer, NotificationSerializer 
+    LoginSerializer, NotificationSerializer, UserSerializer
 )
 
 # ==========================================
@@ -60,7 +62,7 @@ def login(request):
 
 @api_view(['GET'])
 def get_current_user(request):
-    """Lấy thông tin user từ Token đang đăng nhập"""
+    """Lấy thông tin user hiện tại"""
     user = request.user
     if user.is_authenticated:
         role = 'ADMIN' if user.is_superuser else ('STAFF' if user.is_staff else 'CUSTOMER')
@@ -77,7 +79,7 @@ def get_current_user(request):
 
 
 # ==========================================
-# 2. MENU & TABLE APIs (Standard ViewSets)
+# 2. MENU & TABLE APIs
 # ==========================================
 class CategoryViewSet(viewsets.ModelViewSet):
     queryset = Category.objects.all()
@@ -86,7 +88,6 @@ class CategoryViewSet(viewsets.ModelViewSet):
 class ItemViewSet(viewsets.ModelViewSet):
     queryset = Item.objects.all()
     serializer_class = ItemSerializer
-    # Thêm context request để Serializer tạo full link ảnh
     def get_serializer_context(self):
         return {'request': self.request}
 
@@ -129,20 +130,16 @@ def get_menu_data(request):
 
 
 # ==========================================
-# 3. ORDER LOGIC (Tối ưu hóa)
+# 3. ORDER LOGIC
 # ==========================================
 class OrderViewSet(viewsets.ModelViewSet):
-    """ViewSet cơ bản cho Order"""
     queryset = Order.objects.all()
     serializer_class = OrderSerializer
-    
     def create(self, request, *args, **kwargs):
-        # Chuyển hướng sang hàm create_order tùy biến
         return create_order(request)
 
 @api_view(['POST'])
 def create_order(request):
-    """Tạo đơn hoặc Cộng dồn (Merge) món vào đơn cũ"""
     try:
         data = request.data
         table_id = data.get('table_id') or data.get('tableId')
@@ -152,21 +149,15 @@ def create_order(request):
             return Response({'error': 'Thiếu tableId hoặc items'}, status=400)
 
         table = get_object_or_404(Table, id=table_id)
-
-        # 1. Tìm đơn chưa thanh toán (để cộng dồn)
         order = Order.objects.filter(table=table).exclude(status__in=['paid', 'cancelled']).last()
 
-        # 2. Nếu chưa có -> Tạo mới
         if not order:
             order = Order.objects.create(table=table, status='pending', total=0)
         
-        # 👇 QUAN TRỌNG: Luôn cập nhật trạng thái bàn thành "Có người"
-        # (Dù là tạo mới hay cộng dồn thì bàn cũng phải sáng đèn)
         if table.status == 'available':
             table.status = 'occupied'
             table.save()
 
-        # 3. Xử lý thêm món
         current_total = order.total
         
         for i in items_data:
@@ -178,8 +169,6 @@ def create_order(request):
             
             try:
                 item = Item.objects.get(id=pid)
-                
-                # Tìm món trùng trong đơn để cộng dồn (bỏ is_served=False để gộp tất cả)
                 exist = OrderItem.objects.filter(order=order, item=item, is_served=False).first()
                 
                 if exist:
@@ -191,21 +180,16 @@ def create_order(request):
                         order=order, 
                         item=item, 
                         quantity=qty, 
-                        # price=item.price, <--- ĐÃ BỎ DÒNG NÀY (Do DB không có cột price)
                         note=note, 
                         is_served=False
                     )
-                
-                # Cộng tiền của món mới gọi vào tổng bill
                 current_total += (item.price * qty)
                 
             except Item.DoesNotExist:
                 continue
 
-        # 4. Lưu tổng tiền & trả về
         order.total = current_total
         order.save()
-        
         return Response(OrderSerializer(order, context={'request': request}).data, status=201)
 
     except Exception as e:
@@ -213,89 +197,70 @@ def create_order(request):
 
 @api_view(['GET'])
 def get_order_by_table(request, table_id):
-    """Lấy đơn hàng hiện tại của bàn (Cho F5 không mất đơn)"""
     try:
-        # Lấy đơn chưa thanh toán gần nhất
         order = Order.objects.filter(table_id=table_id).exclude(status__in=['paid', 'cancelled']).last()
-        
-        if not order:
-            return Response([]) # Bàn trống
-            
+        if not order: return Response([])
         return Response(OrderSerializer(order, context={'request': request}).data)
     except Exception as e:
         return Response({'error': str(e)}, status=500)
 
 
 # ==========================================
-# 4. ADMIN ACTIONS (Checkout, Cancel, Booking)
+# 4. ADMIN ACTIONS (Checkout, Booking, Noti)
 # ==========================================
 @api_view(['POST'])
-@permission_classes([IsAdminUser]) # Chỉ Admin/Staff
+@permission_classes([IsAdminUser])
 def checkout(request, table_id):
-    """Thanh toán và trả bàn"""
     try:
         table = get_object_or_404(Table, id=table_id)
         order = Order.objects.filter(table=table).exclude(status__in=['paid', 'cancelled', 'served']).last()
+        if not order:
+             order = Order.objects.filter(table=table).exclude(status='paid').last()
         
         if not order:
-            # Check trường hợp đơn đã status='served' nhưng chưa trả tiền (nếu quy trình quán có bước này)
-            # Hoặc đơn giản là lấy đơn chưa thanh toán cuối cùng
-            order = Order.objects.filter(table=table).exclude(status='paid').last()
-            if not order:
-                return Response({'error': 'Không có đơn để thanh toán'}, status=400)
+             return Response({'error': 'Không tìm thấy đơn hàng để thanh toán'}, status=400)
 
-        # Tạo doanh thu
+        # Lưu doanh thu
         method = request.data.get('payment_method', 'cash')
         Revenue.objects.create(order=order, method=method, amount=order.total)
 
-        # Update trạng thái
-        order.status = 'paid' # Đổi thành paid để API get_order không thấy nữa
+        # Update đơn & bàn
+        order.status = 'paid'
         order.save()
-
         table.status = 'available'
         table.save()
 
-        return Response({'message': 'Thanh toán thành công', 'amount': order.total})
+        # Xóa thông báo
+        Notification.objects.filter(table=table).delete()
+
+        return Response({'message': 'Thanh toán thành công'})
     except Exception as e:
         return Response({'error': str(e)}, status=500)
 
 @api_view(['POST'])
 @permission_classes([IsAdminUser])
 def cancel_order(request):
-    """Hủy đơn, Reset bàn và Xóa thông báo"""
     try:
         table_id = request.data.get('table_id')
         if not table_id: 
             return Response({'error': 'Thiếu table_id'}, status=400)
 
-        # 1. Xóa những đơn chưa thanh toán (giữ lại đơn đã paid để thống kê doanh thu)
-        deleted_count, _ = Order.objects.filter(
-            table_id=table_id
-        ).exclude(status='paid').delete()
+        deleted_count, _ = Order.objects.filter(table_id=table_id).exclude(status='paid').delete()
 
-        # 2. Reset trạng thái bàn về 'available' (Trống)
-        # Dùng .update() sẽ nhanh hơn get().save() và không cần try/except check bàn tồn tại
         Table.objects.filter(id=table_id).update(
-            status='available',
-            reserved_at=None, # Xóa giờ đặt bàn (nếu có)
-            expires_at=None
+            status='available', reserved_at=None, expires_at=None
         )
-
-        # 3. ✅ QUAN TRỌNG: Xóa thông báo "Yêu cầu thanh toán" của bàn này
-        # (Để cái chuông trên Admin tắt thông báo đi)
         Notification.objects.filter(table_id=table_id).delete()
 
         if deleted_count > 0:
-            return Response({'message': 'Đã hủy đơn hàng và dọn bàn thành công'})
+            return Response({'message': 'Đã hủy đơn và dọn bàn'})
         else:
-            return Response({'message': 'Đã dọn bàn về trạng thái trống (Không có đơn hàng nào)'})
-            
+            return Response({'message': 'Đã dọn bàn về trạng thái trống'})
     except Exception as e:
         return Response({'error': str(e)}, status=500)
 
 @api_view(['POST'])
 def reserve_table(request, id_ban):
-    """Đặt trước bàn"""
     table = get_object_or_404(Table, id=id_ban)
     if table.status != 'available':
         return Response({'error': 'Bàn không trống'}, status=400)
@@ -304,63 +269,124 @@ def reserve_table(request, id_ban):
     table.reserved_at = timezone.now()
     table.save()
     return Response(TableSerializer(table).data)
+
 @api_view(['POST'])
 def request_payment(request):
     try:
         table_id = request.data.get('table_id')
         table = Table.objects.get(id=table_id)
-
-        # ❌ BỎ DÒNG NÀY: table.status = 'payment_requested'
         
-        # ✅ THÊM DÒNG NÀY: Tạo thông báo mới
         Notification.objects.create(
-            table=table,
-            message=f"{table.number} yêu cầu thanh toán",
-            is_read=False
+            table=table, message=f"{table.number} yêu cầu thanh toán", is_read=False
         )
-        
         return Response({'success': True, 'message': 'Đã gửi yêu cầu!'})
     except Exception as e:
         return Response({'error': str(e)}, status=500)
 
-
-# 2. SỬA HÀM CHECKOUT (THANH TOÁN)
-@api_view(['POST'])
-@permission_classes([IsAdminUser])
-def checkout(request, table_id):
-    try:
-        # ... (Các logic tìm bàn, tìm order, tính tiền GIỮ NGUYÊN) ...
-        table = Table.objects.get(id=table_id)
-        order = Order.objects.filter(table=table).exclude(status__in=['paid', 'cancelled', 'served']).last()
-        if not order:
-             order = Order.objects.filter(table=table).exclude(status='paid').last()
-        
-        # ... (Logic tạo Revenue, save order... GIỮ NGUYÊN) ...
-        Revenue.objects.create(order=order, method=request.data.get('payment_method', 'cash'), amount=order.total)
-        order.status = 'paid'
-        order.save()
-        table.status = 'available'
-        table.save()
-
-        # ✅ THÊM DÒNG NÀY: Xóa thông báo yêu cầu thanh toán của bàn này (nếu có)
-        Notification.objects.filter(table=table).delete()
-
-        return Response({'message': 'Thanh toán thành công'})
-    except Exception as e:
-        return Response({'error': str(e)}, status=500)
-
-
-# 3. THÊM API LẤY THÔNG BÁO (Cho cái chuông)
 @api_view(['GET'])
 def get_notifications(request):
-    # Lấy các thông báo chưa đọc, mới nhất lên đầu
     notifs = Notification.objects.all().order_by('-created_at')
     serializer = NotificationSerializer(notifs, many=True)
     return Response(serializer.data)
 
+
 # ==========================================
-# 5. DASHBOARD & BOOKING (Giữ nguyên logic)
+# 5. DASHBOARD STATS & BOOKING
 # ==========================================
+@api_view(['GET'])
+def get_dashboard_stats(request):
+    try:
+        # 1. Xử lý Time Range
+        range_type = request.query_params.get('range', 'today')
+        today = timezone.now().date()
+        start_date = today
+        filter_kwargs = {}
+
+        if range_type == 'yesterday':
+            start_date = today - timedelta(days=1)
+            filter_kwargs = {'paid_at__date': start_date}
+        elif range_type == 'month':
+            start_date = today.replace(day=1)
+            filter_kwargs = {'paid_at__date__gte': start_date}
+        elif range_type == 'year':
+            start_date = today.replace(month=1, day=1)
+            filter_kwargs = {'paid_at__date__gte': start_date}
+        else: # 'today'
+            filter_kwargs = {'paid_at__date': today}
+
+        # 2. Tính toán Doanh thu
+        revenues = Revenue.objects.filter(**filter_kwargs)
+        total_rev = revenues.aggregate(t=Coalesce(Sum('amount'), 0))['t']
+        cash_rev = revenues.filter(method='cash').aggregate(t=Coalesce(Sum('amount'), 0))['t']
+        transfer_rev = revenues.filter(method='transfer').aggregate(t=Coalesce(Sum('amount'), 0))['t']
+        total_orders = revenues.count()
+
+        # 3. Best Sellers (FIX LỖI ẢNH TẠI ĐÂY)
+        top_items = OrderItem.objects.values('item').annotate(total=Sum('quantity')).order_by('-total')[:5]
+        best_sellers_data = []
+        
+        for t in top_items:
+            try:
+                item = Item.objects.get(pk=t['item'])
+                
+                # --- 🔥 LOGIC XỬ LÝ ẢNH MỚI ---
+                image_url = ""
+                # ƯU TIÊN 1: Lấy từ file ảnh thật (FileField)
+                if item.image:
+                    image_url = request.build_absolute_uri(item.image.url)
+                
+                # ƯU TIÊN 2: Nếu không có file thật, mới xét đến trường text cũ (img)
+                elif item.img:
+                    if str(item.img).startswith('http'):
+                        image_url = item.img
+                    else:
+                        # Tự động ghép domain vào nếu là link tương đối
+                        # Xử lý trường hợp thừa/thiếu dấu /
+                        clean_path = str(item.img).strip('/')
+                        image_url = request.build_absolute_uri(f'/media/{clean_path}')
+                
+                # ƯU TIÊN 3: Ảnh mặc định
+                else:
+                    image_url = "https://via.placeholder.com/150?text=No+Image"
+
+                best_sellers_data.append({
+                    'id': item.id,
+                    'name': item.name,
+                    'price': item.price,
+                    'img': image_url,  # Frontend luôn dùng key 'img'
+                    'sold_count': t['total']
+                })
+                # -----------------------------
+                
+            except Item.DoesNotExist:
+                continue
+
+        # 4. Bookings
+        recent_bookings = Booking.objects.filter(status='pending').order_by('-created_at')[:10]
+        bookings_data = [{
+            "id": b.id,
+            "customer_name": b.customer_name,
+            "phone": b.customer_phone,
+            "time": b.booking_time,
+            "guests": b.guest_count,
+            "status": b.status
+        } for b in recent_bookings]
+
+        return Response({
+            "revenue": {
+                "total": total_rev,
+                "cash": cash_rev,
+                "transfer": transfer_rev,
+                "orders": total_orders
+            },
+            "best_sellers": best_sellers_data,
+            "bookings": bookings_data
+        })
+        
+    except Exception as e:
+        print("Lỗi Dashboard:", e)
+        return Response({'error': str(e)}, status=500)
+
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def create_booking(request):
@@ -387,29 +413,91 @@ def delete_booking(request, pk):
     booking.delete()
     return Response({'success': True})
 
-@api_view(['GET'])
-def get_dashboard_stats(request):
-    # Logic thống kê Dashboard (Rút gọn cho dễ đọc - Giữ nguyên logic cũ của bạn ở đây)
-    range_type = request.query_params.get('range', 'today')
-    today = timezone.now().date()
-    # ... (Giữ nguyên phần tính start_date/end_date của bạn) ...
-    start_date = today # Mặc định
-    
-    # Doanh thu
-    revs = Revenue.objects.filter(paid_at__date__gte=start_date) # Demo
-    total = revs.aggregate(t=Coalesce(Sum('amount'), 0))['t']
-    
-    # Best seller
-    best = Item.objects.annotate(sold=Coalesce(Sum('order_items__quantity'), 0)).order_by('-sold')[:5]
-    best_data = [{
-        'name': i.name, 
-        'sold_count': i.sold, 
-        'price': i.price,  # <--- THÊM DÒNG NÀY
-        'image': request.build_absolute_uri(i.image.url) if i.image else ''
-    } for i in best]
 
-    return Response({
-        'revenue': {'total': total, 'orders': revs.count()},
-        'best_sellers': best_data,
-        'bookings': [] # Thêm logic booking nếu cần
-    })
+# ==========================================
+# 6. EMPLOYEE API (Quản lý nhân viên)
+# ==========================================
+class EmployeeViewSet(viewsets.ViewSet):
+    """
+    API CRUD Nhân viên - Thao tác trực tiếp trên bảng 'auth_user'
+    """
+    permission_classes = [IsAdminUser]
+
+    def list(self, request):
+        users = User.objects.filter(is_staff=True).exclude(username='admin').order_by('id')
+        data = []
+        for u in users:
+            data.append({
+                "id": u.id,
+                "name": u.first_name if u.first_name else u.username,
+                "user": u.username,
+                "role": "admin" if u.is_superuser else "staff"
+            })
+        return Response(data)
+
+    def create(self, request):
+        try:
+            data = request.data
+            username = data.get('user')
+            password = data.get('pass')
+            name = data.get('name')
+            role = data.get('role', 'staff')
+
+            if User.objects.filter(username=username).exists():
+                return Response({'error': 'Tên đăng nhập đã tồn tại!'}, status=400)
+
+            user = User.objects.create(
+                username=username,
+                first_name=name,
+                is_staff=True,
+                is_active=True
+            )
+            if password:
+                user.set_password(password)
+
+            if role == 'admin':
+                user.is_superuser = True
+            else:
+                user.is_superuser = False
+            
+            user.save()
+            return Response({'message': 'Tạo nhân viên thành công', 'id': user.id}, status=201)
+        except Exception as e:
+            return Response({'error': str(e)}, status=500)
+
+    def update(self, request, pk=None):
+        try:
+            user = User.objects.get(pk=pk)
+            data = request.data
+
+            if 'user' in data and data['user'] != user.username:
+                if User.objects.filter(username=data['user']).exists():
+                     return Response({'error': 'Tên đăng nhập đã tồn tại'}, status=400)
+                user.username = data['user']
+            
+            if 'name' in data: user.first_name = data['name']
+
+            new_pass = data.get('pass')
+            if new_pass and str(new_pass).strip() != "":
+                user.set_password(new_pass)
+
+            role = data.get('role')
+            if role == 'admin': user.is_superuser = True
+            elif role == 'staff': user.is_superuser = False
+
+            user.save()
+            return Response({'message': 'Cập nhật thành công'})
+        except User.DoesNotExist:
+            return Response({'error': 'Không tìm thấy nhân viên'}, status=404)
+        except Exception as e:
+            return Response({'error': str(e)}, status=500)
+
+    def destroy(self, request, pk=None):
+        try:
+            user = User.objects.get(pk=pk)
+            if request.user.id == user.id:
+                 return Response({'error': 'Không thể xóa tài khoản đang đăng nhập!'}, status=400)
+            user.delete()
+            return Response({'message': 'Đã xóa nhân viên'})
+        except User.DoesNotExist:
+            return Response({'error': 'User không tồn tại'}, status=404)

@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 #thư mục gốc của dự án
 from pathlib import Path
+from datetime import timedelta
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Quick-start development settings - unsuitable for production
@@ -189,8 +190,26 @@ REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 50
 }
+SIMPLE_JWT = {
+    # Chỉnh thời gian sống của Access Token lên 1 ngày (hoặc 7 ngày tùy bạn)
+    'ACCESS_TOKEN_LIFETIME': timedelta(days=1), 
+    
+    # Thời gian của Refresh Token (dùng để gia hạn)
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    
+    # Các cấu hình khác giữ nguyên mặc định
+    'ROTATE_REFRESH_TOKENS': False,
+    'BLACKLIST_AFTER_ROTATION': False,
+    'UPDATE_LAST_LOGIN': False,
 
-# import os
+    'ALGORITHM': 'HS256',
+    'SIGNING_KEY': SECRET_KEY, # Nó sẽ lấy key mặc định của Django
+    'AUTH_HEADER_TYPES': ('Bearer',), # Hoặc 'Token' tùy frontend bạn đang gửi
+}
+import os
 
-# MEDIA_URL = '/media/'
-# MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+# Đường dẫn URL để truy cập ảnh (VD: http://localhost:8000/media/...)
+MEDIA_URL = '/media/'
+
+# Đường dẫn thư mục thực tế trên máy tính để lưu ảnh
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')

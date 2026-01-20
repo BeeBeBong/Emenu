@@ -1,66 +1,47 @@
 import os
 import django
-import json
 import requests
 from django.core.files.base import ContentFile
-from urllib.parse import urlparse
 
-# 1. Cấu hình để chạy được lệnh Django
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'site1.settings') # Sửa 'config' thành tên folder chứa settings.py nếu khác
+# 1. Cấu hình Django
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'site1.settings')
 django.setup()
 
 from EMENU.models import Item
 
-def import_images_from_json():
-    # Đường dẫn đến file menu.json (Giả sử nằm cùng thư mục file này)
-    # Nếu file nằm trong folder site1, hãy sửa thành 'site1/menu.json'
-    json_path = 'menu.json' 
+def fix_images_final():
+    # Link ảnh mẫu đẹp (Sushi)
+    DEMO_IMAGE_URL = "https://images.unsplash.com/photo-1579871494447-9811cf80d66c?q=80&w=600&auto=format&fit=crop"
     
-    if not os.path.exists(json_path):
-        print(f"❌ Không tìm thấy file {json_path}. Hãy copy file menu.json ra nằm cạnh file manage.py")
-        return
-
-    with open(json_path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
-
-    print("🚀 Bắt đầu tải ảnh và cập nhật Database...")
-
-    count = 0
-    for entry in data:
-        ten_mon = entry.get('ten_mon')
-        img_url = entry.get('img')
-
-        if not img_url:
-            continue
-
-        try:
-            # Tìm món ăn trong DB theo tên
-            item = Item.objects.get(name=ten_mon)
+    print("🚀 Đang tải ảnh mẫu về...")
+    
+    try:
+        response = requests.get(DEMO_IMAGE_URL)
+        if response.status_code == 200:
+            image_content = ContentFile(response.content)
             
-            # Nếu món này chưa có ảnh trong DB, thì tải về
-            if not item.image:
-                print(f"⬇️ Đang tải ảnh cho: {ten_mon}...")
+            items = Item.objects.all()
+            print(f"📦 Đang cập nhật {items.count()} món ăn...")
+
+            for item in items:
+                # 1. Lưu ảnh vào file thật (image)
+                # save=False để chưa lưu vội, chờ lệnh save() cuối cùng
+                item.image.save('sushi_fix.jpg', image_content, save=False)
                 
-                response = requests.get(img_url)
-                if response.status_code == 200:
-                    # Lấy tên file từ URL (ví dụ: sushi.jpg)
-                    file_name = os.path.basename(urlparse(img_url).path)
-                    
-                    # Lưu file vào ImageField của Django
-                    item.image.save(file_name, ContentFile(response.content), save=True)
-                    count += 1
-                    print(f"✅ Đã lưu: {file_name}")
-                else:
-                    print(f"⚠️ Link ảnh lỗi: {img_url}")
-            else:
-                print(f"⏩ {ten_mon} đã có ảnh, bỏ qua.")
+                # 2. QUAN TRỌNG: Xóa trường text cũ (img) để tránh xung đột
+                # (Nếu model Item của bạn có trường 'img', ta sẽ xóa nó đi)
+                if hasattr(item, 'img'):
+                    item.img = '' 
+                
+                item.save()
+                print(f"✅ Đã fix: {item.name}")
 
-        except Item.DoesNotExist:
-            print(f"⚠️ Không tìm thấy món '{ten_mon}' trong Database (Hãy chắc chắn bạn đã import tên món trước)")
-        except Exception as e:
-            print(f"❌ Lỗi khi xử lý {ten_mon}: {e}")
-
-    print(f"\n🎉 HOÀN TẤT! Đã cập nhật ảnh cho {count} món ăn.")
+            print("\n🎉 HOÀN TẤT! Tất cả ảnh đã được đồng bộ.")
+        else:
+            print("❌ Không tải được ảnh mẫu.")
+            
+    except Exception as e:
+        print(f"❌ Có lỗi: {e}")
 
 if __name__ == '__main__':
-    import_images_from_json()
+    fix_images_final()
