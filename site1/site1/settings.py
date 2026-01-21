@@ -132,7 +132,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:5174",
     "http://127.0.0.1:8000",
     "http://localhost:8000",
-    "https://unretouched-overpopulously-maeve.ngrok-free.dev",  # Backend ngrok
+    "https://dayana-overcomplacent-chubbily.ngrok-free.dev",  # Backend ngrok
     "https://incommutable-antwan-nondemonstrably.ngrok-free.dev", #fontend ngrok
 ]
 
@@ -171,12 +171,12 @@ ALLOWED_HOSTS = [
     'localhost',
     '127.0.0.1',
     'incommutable-antwan-nondemonstrably.ngrok-free.dev',  # Link ngrok của frontend
-    'unretouched-overpopulously-maeve.ngrok-free.dev', # Link ngrok của backend
+    'dayana-overcomplacent-chubbily.ngrok-free.dev', # Link ngrok của backend
 ]
 
 # CSRF Trusted Origins (cho phép CSRF từ các domain này)
 CSRF_TRUSTED_ORIGINS = [
-    'https://unretouched-overpopulously-maeve.ngrok-free.dev',  # Backend ngrok
+    'https://dayana-overcomplacent-chubbily.ngrok-free.dev',  # Backend ngrok
     'https://incommutable-antwan-nondemonstrably.ngrok-free.dev',  # Frontend ngrok (thêm vào khi có)
 ]
 
