@@ -87,8 +87,11 @@ class ItemSerializer(serializers.ModelSerializer):
 
     def get_img(self, obj):
         try:
-            # Sửa từ obj.image (hoặc obj.hinh_anh) thành obj.image cho đúng Model
             if obj.image:
+                request = self.context.get('request')
+                if request:
+                    # Trả về Full URL (vd: https://ngrok.../media/...)
+                    return request.build_absolute_uri(obj.image.url)
                 return obj.image.url
         except: pass
         return ""
@@ -118,7 +121,7 @@ class ProductFormSerializer(serializers.ModelSerializer):
 # 3. ORDER & TABLE
 # ==========================================
 class OrderItemSerializer(serializers.ModelSerializer):
-    # 👇 SỬA 1: Ánh xạ 'id' của Frontend vào 'id_chitiet' của Model
+    # Ánh xạ id frontend -> id_chitiet backend
     id = serializers.IntegerField(source='id_chitiet', read_only=True)
     
     itemId = serializers.IntegerField(source='item.id', read_only=True)
@@ -129,16 +132,18 @@ class OrderItemSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = OrderItem
-        # Field 'id' ở đây giờ đã trỏ vào 'id_chitiet' nhờ dòng khai báo trên
         fields = ['id', 'itemId', 'name', 'price', 'quantity', 'note', 'isServed', 'image']
 
     def get_image(self, obj):
         try:
             if obj.item and obj.item.image:
+                request = self.context.get('request')
+                if request:
+                    # Trả về Full URL cho Order
+                    return request.build_absolute_uri(obj.item.image.url)
                 return obj.item.image.url
         except: pass
         return ""
-
 class OrderSerializer(serializers.ModelSerializer):
     # 👇 SỬA 2: Ánh xạ 'id' của Frontend vào 'id_donhang' của Model
     id = serializers.IntegerField(source='id_donhang', read_only=True)
