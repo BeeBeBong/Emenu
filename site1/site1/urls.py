@@ -13,7 +13,7 @@ from EMENU import views
 # Router
 router = DefaultRouter()
 router.register(r'categories', views.CategoryViewSet, basename='category')
-router.register(r'items', views.ItemViewSet, basename='item') # Đã dùng ItemViewSet thông minh
+router.register(r'items', views.ItemViewSet, basename='item')
 router.register(r'tables', views.TableViewSet, basename='table')
 router.register(r'orders', views.OrderViewSet, basename='order')
 router.register(r'employees', views.EmployeeViewSet, basename='employees')

@@ -68,52 +68,26 @@ class Table(models.Model):
 
 # 4. ORDERS - Đơn hàng
 class Order(models.Model):
-    STATUS_CHOICES = [
-        ('pending', 'Chờ xử lý'),
-        ('preparing', 'Đang làm'),
-        ('ready', 'Đã xong'),
-        ('served', 'Đã phục vụ'),
-        ('cancelled', 'Đã hủy'),
-    ]
-    
-    id = models.AutoField(primary_key=True, db_column='id_donhang')
-    table = models.ForeignKey(Table, on_delete=models.CASCADE, db_column='id_ban', related_name='orders')
-    total = models.IntegerField(default=0, db_column='tong_tien')
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', db_column='trang_thai_tt')
+    id_donhang = models.AutoField(primary_key=True)
+    table = models.ForeignKey('Table', on_delete=models.CASCADE, db_column='id_ban')
+    total = models.IntegerField(db_column='tong_tien', default=0)
+    status = models.CharField(max_length=20, db_column='trang_thai_tt', default='pending')
     created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         db_table = 'orders'
-        verbose_name = 'Đơn hàng'
-        verbose_name_plural = 'Đơn hàng'
-    
-    def __str__(self):
-        return f"Đơn #{self.id} - {self.table.number}"
-    
-    def save(self, *args, **kwargs):
-        # Khi tạo đơn mới, cập nhật trạng thái bàn thành "occupied"
-        if not self.pk:  # Đơn mới
-            self.table.status = 'occupied'
-            self.table.save()
-        super().save(*args, **kwargs)
 
-# 5. ORDER_ITEMS - Chi tiết đơn hàng
 class OrderItem(models.Model):
-    id = models.AutoField(primary_key=True, db_column='id_chitiet')
-    order = models.ForeignKey(Order, on_delete=models.CASCADE, db_column='id_donhang', related_name='items')
-    item = models.ForeignKey(Item, on_delete=models.CASCADE, db_column='id_mon', related_name='order_items')
-    quantity = models.IntegerField(default=1, db_column='so_luong')
-    note = models.TextField(null=True, blank=True, db_column='ghi_chu')
-    is_served = models.BooleanField(default=False, db_column='da_ra_mon')  # Đã ra món chưa
-    
+    id_chitiet = models.AutoField(primary_key=True)
+    # QUAN TRỌNG: related_name='items' để Serializer gọi đúng
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='items', db_column='id_donhang')
+    item = models.ForeignKey('Item', on_delete=models.CASCADE, db_column='id_mon')
+    quantity = models.IntegerField(db_column='so_luong', default=1)
+    note = models.TextField(db_column='ghi_chu', null=True, blank=True)
+    is_served = models.BooleanField(db_column='da_ra_mon', default=False)
+
     class Meta:
         db_table = 'order_items'
-        verbose_name = 'Chi tiết đơn hàng'
-        verbose_name_plural = 'Chi tiết đơn hàng'
-    
-    def __str__(self):
-        return f"{self.order} - {self.item.name} x{self.quantity}"
 
 # 6. REVENUE - Doanh thu
 class Revenue(models.Model):

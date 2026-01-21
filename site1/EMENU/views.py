@@ -154,52 +154,60 @@ class TableViewSet(viewsets.ModelViewSet):
     queryset = Table.objects.all().order_by('id')
     serializer_class = TableSerializer
 
+@api_view(['GET'])
+def get_order_by_table(request, table_id):
+    try:
+        # Lấy đơn hàng cuối chưa thanh toán của bàn (id_ban)
+        order = Order.objects.filter(table=table_id).exclude(status__in=['paid', 'cancelled']).last()
+        
+        if not order:
+            return Response([], status=200) # Frontend mong đợi mảng rỗng nếu chưa có đơn
+            
+        # QUAN TRỌNG: Thêm context={'request': request} để lấy link ảnh món ăn
+        serializer = OrderSerializer(order, context={'request': request})
+        return Response(serializer.data)
+    except Exception as e:
+        return Response({'error': str(e)}, status=500)
 @api_view(['POST'])
 def create_order(request):
     try:
         data = request.data
         table_id = data.get('table_id') or data.get('tableId')
         items_data = data.get('items')
-        if not table_id or not items_data: return Response({'error': 'Thiếu data'}, status=400)
-
+        
         table = get_object_or_404(Table, id=table_id)
+        # Sửa filter tương tự get_order_by_table
         order = Order.objects.filter(table=table).exclude(status__in=['paid', 'cancelled']).last()
+        
         if not order:
             order = Order.objects.create(table=table, status='pending', total=0)
         
-        if table.status == 'available':
-            table.status = 'occupied'; table.save()
+        table.status = 'occupied'
+        table.save()
 
         current_total = order.total
         for i in items_data:
             pid = i.get('id') or i.get('itemId')
             qty = int(i.get('quantity', 1))
             note = i.get('note', '')
-            if not pid: continue
+            
             try:
                 item = Item.objects.get(id=pid)
+                # Sửa filter: order=order
                 exist = OrderItem.objects.filter(order=order, item=item, is_served=False).first()
                 if exist:
                     exist.quantity += qty
                     if note: exist.note = note
                     exist.save()
                 else:
-                    OrderItem.objects.create(order=order, item=item, quantity=qty, note=note, is_served=False)
+                    OrderItem.objects.create(order=order, item=item, quantity=qty, note=note)
                 current_total += (item.price * qty)
-            except Item.DoesNotExist: continue
+            except Item.DoesNotExist:
+                continue
 
         order.total = current_total
         order.save()
         return Response(OrderSerializer(order, context={'request': request}).data, status=201)
-    except Exception as e:
-        return Response({'error': str(e)}, status=500)
-
-@api_view(['GET'])
-def get_order_by_table(request, table_id):
-    try:
-        order = Order.objects.filter(table_id=table_id).exclude(status__in=['paid', 'cancelled']).last()
-        if not order: return Response([])
-        return Response(OrderSerializer(order, context={'request': request}).data)
     except Exception as e:
         return Response({'error': str(e)}, status=500)
 
@@ -294,8 +302,7 @@ def get_dashboard_stats(request):
                 img_data = ""
                 if item.image and hasattr(item.image, 'path') and os.path.exists(item.image.path):
                     with open(item.image.path, "rb") as f:
-                        encoded = base64.b64encode(f.read()).decode('utf-8')
-                        img_data = f"data:image/jpeg;base64,{encoded}"
+                        img_data = f"data:image/jpeg;base64,{base64.b64encode(f.read()).decode('utf-8')}"
                 else:
                     img_data = "https://images.unsplash.com/photo-1579871494447-9811cf80d66c?q=80&w=200"
 

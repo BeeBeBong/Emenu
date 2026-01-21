@@ -87,12 +87,11 @@ class ItemSerializer(serializers.ModelSerializer):
 
     def get_img(self, obj):
         try:
-            if obj.image and hasattr(obj.image, 'path') and os.path.exists(obj.image.path):
-                with open(obj.image.path, "rb") as image_file:
-                    encoded = base64.b64encode(image_file.read()).decode('utf-8')
-                    return f"data:image/jpeg;base64,{encoded}"
-            return "https://images.unsplash.com/photo-1579871494447-9811cf80d66c?q=80&w=400"
-        except: return ""
+            # Sửa từ obj.image (hoặc obj.hinh_anh) thành obj.image cho đúng Model
+            if obj.image:
+                return obj.image.url
+        except: pass
+        return ""
 
 # --- B. Serializer để THÊM/SỬA (Dùng FlexibleImageField) ---
 class ProductFormSerializer(serializers.ModelSerializer):
@@ -119,36 +118,37 @@ class ProductFormSerializer(serializers.ModelSerializer):
 # 3. ORDER & TABLE
 # ==========================================
 class OrderItemSerializer(serializers.ModelSerializer):
-    itemId = serializers.IntegerField(source='item.id', read_only=True)
-    name = serializers.CharField(source='item.name', read_only=True)
-    price = serializers.IntegerField(source='item.price', read_only=True)
-    image = serializers.SerializerMethodField()
-    img = serializers.SerializerMethodField()
+    # Dùng .pk để lấy đúng khóa chính (id_mon) của bảng Item
+    itemId = serializers.IntegerField(source='item.pk', read_only=True)
+    name = serializers.CharField(source='item.ten_mon', read_only=True)
+    price = serializers.IntegerField(source='item.gia', read_only=True)
     isServed = serializers.BooleanField(source='is_served', read_only=True)
-    
+    image = serializers.SerializerMethodField()
+
     class Meta:
         model = OrderItem
-        fields = ['id', 'itemId', 'name', 'price', 'quantity', 'note', 'isServed', 'image', 'img']
+        fields = ['id_chitiet', 'itemId', 'name', 'price', 'quantity', 'note', 'isServed', 'image']
 
-    def get_image_base64(self, obj):
+    def get_image(self, obj):
         try:
-            if obj.item and obj.item.image and hasattr(obj.item.image, 'path') and os.path.exists(obj.item.image.path):
-                with open(obj.item.image.path, "rb") as f:
-                    encoded = base64.b64encode(f.read()).decode('utf-8')
-                    return f"data:image/jpeg;base64,{encoded}"
+            # Sửa từ obj.item.hinh_anh thành obj.item.image
+            if obj.item and obj.item.image:
+                return obj.item.image.url
         except: pass
-        return "https://images.unsplash.com/photo-1579871494447-9811cf80d66c?q=80&w=200"
-    def get_image(self, obj): return self.get_image_base64(obj)
-    def get_img(self, obj): return self.get_image_base64(obj)
+        return ""
 
 class OrderSerializer(serializers.ModelSerializer):
-    tableId = serializers.IntegerField(source='table.id', read_only=True)
+    tableId = serializers.IntegerField(source='table.pk', read_only=True)
     tableNumber = serializers.CharField(source='table.number', read_only=True)
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
-    items = OrderItemSerializer(source='order_items', many=True, read_only=True)
+    
+    # SỬA: Bỏ source='order_items' hoặc source='items' bị thừa. 
+    # Tên biến 'items' tự động khớp với related_name='items' trong OrderItem.order
+    items = OrderItemSerializer(many=True, read_only=True)
+
     class Meta:
         model = Order
-        fields = ['id', 'tableId', 'tableNumber', 'total', 'status', 'createdAt', 'items']
+        fields = ['id_donhang', 'tableId', 'tableNumber', 'total', 'status', 'createdAt', 'items']
 
 class TableSerializer(serializers.ModelSerializer):
     current_order_total = serializers.SerializerMethodField()
