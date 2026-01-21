@@ -145,7 +145,8 @@ def get_menu_data(request):
 # 3. ORDER & TABLES
 # ==========================================
 class OrderViewSet(viewsets.ModelViewSet):
-    queryset = Order.objects.all()
+    # Sắp xếp theo id_donhang để tránh lỗi nếu Django cố tìm 'id'
+    queryset = Order.objects.all().order_by('-id_donhang') 
     serializer_class = OrderSerializer
     def create(self, request, *args, **kwargs):
         return create_order(request)
@@ -157,13 +158,13 @@ class TableViewSet(viewsets.ModelViewSet):
 @api_view(['GET'])
 def get_order_by_table(request, table_id):
     try:
-        # Lấy đơn hàng cuối chưa thanh toán của bàn (id_ban)
+        # 👇 SỬA: table=table_id (khớp với field name trong Model Order)
+        # Loại bỏ các trạng thái đã kết thúc
         order = Order.objects.filter(table=table_id).exclude(status__in=['paid', 'cancelled']).last()
         
         if not order:
-            return Response([], status=200) # Frontend mong đợi mảng rỗng nếu chưa có đơn
+            return Response(None, status=200) # Trả về null nếu không có đơn
             
-        # QUAN TRỌNG: Thêm context={'request': request} để lấy link ảnh món ăn
         serializer = OrderSerializer(order, context={'request': request})
         return Response(serializer.data)
     except Exception as e:

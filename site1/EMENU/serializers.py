@@ -118,38 +118,44 @@ class ProductFormSerializer(serializers.ModelSerializer):
 # 3. ORDER & TABLE
 # ==========================================
 class OrderItemSerializer(serializers.ModelSerializer):
-    # Dùng .pk để lấy đúng khóa chính (id_mon) của bảng Item
-    itemId = serializers.IntegerField(source='item.pk', read_only=True)
-    name = serializers.CharField(source='item.ten_mon', read_only=True)
-    price = serializers.IntegerField(source='item.gia', read_only=True)
-    isServed = serializers.BooleanField(source='is_served', read_only=True)
+    # 👇 SỬA 1: Ánh xạ 'id' của Frontend vào 'id_chitiet' của Model
+    id = serializers.IntegerField(source='id_chitiet', read_only=True)
+    
+    itemId = serializers.IntegerField(source='item.id', read_only=True)
+    name = serializers.CharField(source='item.name', read_only=True)
+    price = serializers.IntegerField(source='item.price', read_only=True)
     image = serializers.SerializerMethodField()
-
+    isServed = serializers.BooleanField(source='is_served', read_only=True)
+    
     class Meta:
         model = OrderItem
-        fields = ['id_chitiet', 'itemId', 'name', 'price', 'quantity', 'note', 'isServed', 'image']
+        # Field 'id' ở đây giờ đã trỏ vào 'id_chitiet' nhờ dòng khai báo trên
+        fields = ['id', 'itemId', 'name', 'price', 'quantity', 'note', 'isServed', 'image']
 
     def get_image(self, obj):
         try:
-            # Sửa từ obj.item.hinh_anh thành obj.item.image
             if obj.item and obj.item.image:
                 return obj.item.image.url
         except: pass
         return ""
 
 class OrderSerializer(serializers.ModelSerializer):
-    tableId = serializers.IntegerField(source='table.pk', read_only=True)
+    # 👇 SỬA 2: Ánh xạ 'id' của Frontend vào 'id_donhang' của Model
+    id = serializers.IntegerField(source='id_donhang', read_only=True)
+    
+    tableId = serializers.IntegerField(source='table.id', read_only=True)
     tableNumber = serializers.CharField(source='table.number', read_only=True)
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
     
-    # SỬA: Bỏ source='order_items' hoặc source='items' bị thừa. 
-    # Tên biến 'items' tự động khớp với related_name='items' trong OrderItem.order
+    total = serializers.IntegerField(read_only=True)
+    status = serializers.CharField(read_only=True)
+    
     items = OrderItemSerializer(many=True, read_only=True)
 
     class Meta:
         model = Order
-        fields = ['id_donhang', 'tableId', 'tableNumber', 'total', 'status', 'createdAt', 'items']
-
+        # Field 'id' ở đây giờ đã trỏ vào 'id_donhang'
+        fields = ['id', 'tableId', 'tableNumber', 'total', 'status', 'createdAt', 'items']
 class TableSerializer(serializers.ModelSerializer):
     current_order_total = serializers.SerializerMethodField()
     duration = serializers.SerializerMethodField()

@@ -46,7 +46,7 @@ urlpatterns = [
     path('api/menu/', views.get_menu, name='get_menu'),
     path('api/menu/category/<int:id_danhmuc>/', views.get_menu_by_category, name='get_menu_by_category'),
     path('api/notifications/', views.get_notifications, name='get_notifications'),
-    
+    path('menu/data/', views.get_menu_data, name='get_menu_data'),
     # 7. Router APIs
     path('api/', include(router.urls)),
 ]
