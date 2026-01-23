@@ -23,34 +23,69 @@ def get_order_by_table(request, table_id):
 @api_view(['POST'])
 def create_order(request):
     try:
-        data = request.data; table_id = data.get('table_id') or data.get('tableId')
+        data = request.data
+        table_id = data.get('table_id') or data.get('tableId')
         items_data = data.get('items') or []
+        
         if not table_id: return Response({'error': 'Thiếu ID bàn'}, 400)
         
         table = get_object_or_404(Table, pk=table_id)
+        
+        # Tìm đơn hàng hiện tại của bàn
         order = Order.objects.filter(table=table).exclude(status__in=['paid', 'cancelled']).last()
-        if not order: order = Order.objects.create(table=table, status='pending', total=0)
-        if table.status == 'available': table.status = 'occupied'; table.save()
+        if not order:
+            order = Order.objects.create(table=table, status='pending', total=0)
+        
+        if table.status == 'available':
+            table.status = 'occupied'; table.save()
 
+        # --- XỬ LÝ MÓN ĂN ---
         for i in items_data:
+            # 1. Lấy ID chuẩn
             pid = i.get('product_id') or i.get('itemId') or i.get('id') 
-            if not pid: pid = i.get('id')
+            if not pid: pid = i.get('id') # Fallback
+
             if not pid: continue 
 
+            # 2. Tìm món trong Menu
             item = Item.objects.filter(pk=pid).first()
-            if not item: return Response({'error': f"Lỗi ID={pid} không tồn tại. Xóa cache!"}, 400)
+            if not item: 
+                # Bỏ qua hoặc báo lỗi tùy logic, ở đây ta return lỗi để dễ debug
+                return Response({'error': f"Lỗi: Không tìm thấy món ID={pid}"}, 400)
 
-            qty = int(i.get('quantity', 1)); note = i.get('note', '')
+            # 3. Lấy số lượng gửi lên (thường là 1)
+            qty = int(i.get('quantity', 1))
+            note = i.get('note', '')
+
+            # 4. Kiểm tra món này đã có trong đơn chưa (và chưa ra món)
             exist = OrderItem.objects.filter(order=order, item=item, is_served=False).first()
-            if exist: exist.quantity = qty; exist.note = note if note else exist.note; exist.save()
-            else: OrderItem.objects.create(order=order, item=item, quantity=qty, note=note)
+            
+            if exist:
+                # 🔥 SỬA QUAN TRỌNG: CỘNG DỒN SỐ LƯỢNG (+=) THAY VÌ GHI ĐÈ (=)
+                exist.quantity += qty 
+                
+                # Gộp ghi chú nếu có (Ví dụ: "Không hành" + "Ít đá")
+                if note: 
+                    exist.note = f"{exist.note}, {note}" if exist.note else note
+                
+                exist.save()
+            else:
+                # Nếu chưa có thì tạo mới
+                OrderItem.objects.create(order=order, item=item, quantity=qty, note=note)
 
+        # 5. Tính lại tổng tiền (Loop qua DB để chính xác tuyệt đối)
         total_price = 0
-        for line in OrderItem.objects.filter(order=order): total_price += line.quantity * line.item.price
-        order.total = total_price; order.save()
+        current_items = OrderItem.objects.filter(order=order)
+        for line in current_items:
+            total_price += line.quantity * line.item.price
+
+        order.total = total_price
+        order.save()
         
-        return Response(OrderSerializer(order, context={'request': request}).data, 201)
-    except Exception as e: return Response({'error': str(e)}, 500)
+        return Response(OrderSerializer(order, context={'request': request}).data, status=201)
+        
+    except Exception as e:
+        return Response({'error': str(e)}, status=500)
 
 @api_view(['POST'])
 @permission_classes([IsAdminUser])

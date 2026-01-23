@@ -37,8 +37,34 @@ def get_current_user(request):
     return Response({'message': 'Chưa đăng nhập'}, 401)
 
 class CategoryViewSet(viewsets.ModelViewSet):
-    queryset = Category.objects.all(); serializer_class = CategorySerializer
-    def get_permissions(self): return [AllowAny()] if self.action in ['list', 'retrieve'] else [IsAdminUser()]
+    queryset = Category.objects.all().order_by('id') # Sắp xếp để không bị lộn xộn
+    serializer_class = CategorySerializer
+    
+    # 1. Phân quyền: Khách chỉ được xem, Admin mới được Thêm/Sửa/Xóa
+    def get_permissions(self):
+        if self.action in ['list', 'retrieve']:
+            return [AllowAny()]
+        return [IsAdminUser()]
+
+    # 2. Custom hàm tạo để kiểm tra trùng tên
+    def create(self, request, *args, **kwargs):
+        try:
+            name = request.data.get('name', '').strip()
+            
+            # Validate: Không để trống
+            if not name:
+                return Response({'error': 'Tên nhóm không được để trống!'}, status=400)
+            
+            # Validate: Kiểm tra trùng tên (không phân biệt hoa thường)
+            if Category.objects.filter(name__iexact=name).exists():
+                return Response({'error': f'Nhóm món "{name}" đã tồn tại!'}, status=400)
+
+            # Tạo mới
+            category = Category.objects.create(name=name)
+            return Response(CategorySerializer(category).data, status=201)
+            
+        except Exception as e:
+            return Response({'error': str(e)}, status=500)
 
 class ItemViewSet(viewsets.ModelViewSet):
     queryset = Item.objects.all().order_by('-id')

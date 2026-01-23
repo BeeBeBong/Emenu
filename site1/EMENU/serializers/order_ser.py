@@ -9,7 +9,11 @@ class OrderItemSerializer(serializers.ModelSerializer):
     price = serializers.IntegerField(source='item.price', read_only=True)
     image = serializers.SerializerMethodField()
     isServed = serializers.BooleanField(source='is_served', read_only=True)
-    class Meta: model = OrderItem; fields = ['id', 'product_id', 'name', 'price', 'quantity', 'note', 'isServed', 'image']
+    
+    class Meta: 
+        model = OrderItem
+        fields = ['id', 'product_id', 'name', 'price', 'quantity', 'note', 'isServed', 'image']
+
     def get_image(self, obj):
         try:
             if obj.item and obj.item.image:
@@ -25,8 +29,56 @@ class OrderSerializer(serializers.ModelSerializer):
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
     total = serializers.IntegerField(read_only=True)
     status = serializers.CharField(read_only=True)
-    items = OrderItemSerializer(many=True, read_only=True)
-    class Meta: model = Order; fields = ['id', 'tableId', 'tableNumber', 'total', 'status', 'createdAt', 'items']
+    
+    # 🔥 THAY ĐỔI: Dùng SerializerMethodField để tự xử lý logic gộp món
+    items = serializers.SerializerMethodField()
+
+    class Meta: 
+        model = Order
+        fields = ['id', 'tableId', 'tableNumber', 'total', 'status', 'createdAt', 'items']
+
+    # 👇 HÀM MỚI: Tự động cộng dồn các món giống nhau
+    def get_items(self, obj):
+        all_items = obj.items.all()
+        grouped = {} # Dictionary để gom nhóm: { product_id: {data...} }
+        
+        for item in all_items:
+            pid = item.item.id
+            
+            # Nếu món này chưa có trong danh sách gộp -> Thêm mới
+            if pid not in grouped:
+                # Lấy link ảnh
+                img_url = ""
+                try:
+                    if item.item.image:
+                        req = self.context.get('request')
+                        if req: img_url = req.build_absolute_uri(item.item.image.url)
+                        else: img_url = item.item.image.url
+                except: pass
+
+                grouped[pid] = {
+                    'id': item.id_chitiet,
+                    'product_id': pid,
+                    'name': item.item.name,
+                    'price': item.item.price,
+                    'quantity': item.quantity, # Khởi tạo số lượng
+                    'note': item.note,
+                    'isServed': item.is_served,
+                    'image': img_url
+                }
+            else:
+                # Nếu món này đã có -> CỘNG DỒN SỐ LƯỢNG
+                grouped[pid]['quantity'] += item.quantity
+                
+                # Gộp luôn ghi chú (nếu có)
+                if item.note:
+                    if grouped[pid]['note']: 
+                        grouped[pid]['note'] += f", {item.note}"
+                    else: 
+                        grouped[pid]['note'] = item.note
+        
+        # Trả về danh sách đã gộp gọn gàng
+        return list(grouped.values())
 
 class TableSerializer(serializers.ModelSerializer):
     current_order_total = serializers.SerializerMethodField()
