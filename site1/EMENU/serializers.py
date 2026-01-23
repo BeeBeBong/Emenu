@@ -121,10 +121,9 @@ class ProductFormSerializer(serializers.ModelSerializer):
 # 3. ORDER & TABLE
 # ==========================================
 class OrderItemSerializer(serializers.ModelSerializer):
-    # Ánh xạ id frontend -> id_chitiet backend
+    # Map id Frontend -> id_chitiet Backend
     id = serializers.IntegerField(source='id_chitiet', read_only=True)
-    
-    itemId = serializers.IntegerField(source='item.id', read_only=True)
+    product_id = serializers.IntegerField(source='item.pk', read_only=True)
     name = serializers.CharField(source='item.name', read_only=True)
     price = serializers.IntegerField(source='item.price', read_only=True)
     image = serializers.SerializerMethodField()
@@ -132,34 +131,34 @@ class OrderItemSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = OrderItem
-        fields = ['id', 'itemId', 'name', 'price', 'quantity', 'note', 'isServed', 'image']
+        fields = ['id', 'product_id', 'name', 'price', 'quantity', 'note', 'isServed', 'image']
 
     def get_image(self, obj):
         try:
             if obj.item and obj.item.image:
                 request = self.context.get('request')
                 if request:
-                    # Trả về Full URL cho Order
                     return request.build_absolute_uri(obj.item.image.url)
                 return obj.item.image.url
         except: pass
         return ""
+
 class OrderSerializer(serializers.ModelSerializer):
-    # 👇 SỬA 2: Ánh xạ 'id' của Frontend vào 'id_donhang' của Model
+    # Map id Frontend -> id_donhang Backend
     id = serializers.IntegerField(source='id_donhang', read_only=True)
     
-    tableId = serializers.IntegerField(source='table.id', read_only=True)
+    tableId = serializers.IntegerField(source='table.pk', read_only=True)
     tableNumber = serializers.CharField(source='table.number', read_only=True)
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
     
     total = serializers.IntegerField(read_only=True)
     status = serializers.CharField(read_only=True)
     
+    # Quan trọng: items lấy từ related_name='items' trong Model
     items = OrderItemSerializer(many=True, read_only=True)
 
     class Meta:
         model = Order
-        # Field 'id' ở đây giờ đã trỏ vào 'id_donhang'
         fields = ['id', 'tableId', 'tableNumber', 'total', 'status', 'createdAt', 'items']
 class TableSerializer(serializers.ModelSerializer):
     current_order_total = serializers.SerializerMethodField()

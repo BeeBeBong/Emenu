@@ -86,7 +86,7 @@ class ItemViewSet(viewsets.ModelViewSet):
     """
     queryset = Item.objects.all().order_by('-id')
     
-    # 🔥 QUAN TRỌNG: Cấu hình quyền truy cập động
+    # Cấu hình quyền truy cập động
     def get_permissions(self):
         if self.action in ['list', 'retrieve']:
             return [AllowAny()] # <--- MỞ CỬA CHO KHÁCH XEM
@@ -132,15 +132,37 @@ def get_menu_by_category(request, id_danhmuc):
 @authentication_classes([])
 def get_menu_data(request):
     try:
-        json_path = os.path.join(settings.BASE_DIR, 'menu.json')
-        with open(json_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        categories = sorted(list(set(i['phan_loai'] for i in data)))
-        products = [{'id': idx, 'name': item['ten_mon'], 'price': item['gia'], 'img': '', 'category': item['phan_loai']} for idx, item in enumerate(data, 1)]
+        # 1. LẤY DỮ LIỆU THẬT TỪ DATABASE (Thay vì đọc file json)
+        # Sắp xếp theo Category rồi đến ID
+        items = Item.objects.select_related('category').all().order_by('category__id', 'id')
+        
+        # 2. Lấy danh sách tên danh mục
+        categories = sorted(list(set(
+            item.category.name for item in items if item.category
+        )))
+        
+        # 3. Tạo danh sách sản phẩm với ID THẬT
+        products = []
+        for item in items:
+            # Xử lý link ảnh
+            img_url = ""
+            if item.image:
+                if request:
+                    img_url = request.build_absolute_uri(item.image.url)
+                else:
+                    img_url = item.image.url
+            
+            products.append({
+                'id': item.id,  # <--- QUAN TRỌNG: Lấy ID thật (ví dụ: 53, 62...)
+                'name': item.name,
+                'price': item.price,
+                'img': img_url,
+                'category': item.category.name if item.category else "Khác"
+            })
+            
         return Response({'categories': categories, 'products': products})
-    except Exception:
-        return Response({'error': 'File error'}, status=500)
-
+    except Exception as e:
+        return Response({'error': str(e)}, status=500)
 # ==========================================
 # 3. ORDER & TABLES
 # ==========================================
@@ -174,41 +196,57 @@ def create_order(request):
     try:
         data = request.data
         table_id = data.get('table_id') or data.get('tableId')
-        items_data = data.get('items')
+        items_data = data.get('items') or []
         
-        table = get_object_or_404(Table, id=table_id)
-        # Sửa filter tương tự get_order_by_table
+        if not table_id: return Response({'error': 'Thiếu ID bàn'}, status=400)
+        
+        table = get_object_or_404(Table, pk=table_id)
+        
+        # Tìm hoặc tạo đơn hàng
         order = Order.objects.filter(table=table).exclude(status__in=['paid', 'cancelled']).last()
-        
         if not order:
             order = Order.objects.create(table=table, status='pending', total=0)
         
-        table.status = 'occupied'
-        table.save()
+        if table.status == 'available':
+            table.status = 'occupied'; table.save()
 
-        current_total = order.total
+        # --- XỬ LÝ MÓN ĂN  ---
         for i in items_data:
-            pid = i.get('id') or i.get('itemId')
+            # 1. Lấy ID
+            pid = i.get('product_id') or i.get('itemId') or i.get('id') 
+            if not pid: pid = i.get('id')
+
+            if not pid: continue 
+
+            # 2. Tìm món ăn
+            item = Item.objects.filter(pk=pid).first()
+            if not item:
+                error_msg = f"LỖI: Frontend gửi ID={pid} nhưng Backend không tìm thấy món này! Hãy xóa Cache/Giỏ hàng."
+                return Response({'error': error_msg}, status=400)
+
+            # 3. Logic thêm/sửa món
             qty = int(i.get('quantity', 1))
             note = i.get('note', '')
-            
-            try:
-                item = Item.objects.get(id=pid)
-                # Sửa filter: order=order
-                exist = OrderItem.objects.filter(order=order, item=item, is_served=False).first()
-                if exist:
-                    exist.quantity += qty
-                    if note: exist.note = note
-                    exist.save()
-                else:
-                    OrderItem.objects.create(order=order, item=item, quantity=qty, note=note)
-                current_total += (item.price * qty)
-            except Item.DoesNotExist:
-                continue
 
-        order.total = current_total
+            exist = OrderItem.objects.filter(order=order, item=item, is_served=False).first()
+            if exist:
+                exist.quantity = qty 
+                if note: exist.note = note
+                exist.save()
+            else:
+                OrderItem.objects.create(order=order, item=item, quantity=qty, note=note)
+
+        # 4. Tính lại tổng tiền
+        total_price = 0
+        current_items = OrderItem.objects.filter(order=order)
+        for line in current_items:
+            total_price += line.quantity * line.item.price
+
+        order.total = total_price
         order.save()
+        
         return Response(OrderSerializer(order, context={'request': request}).data, status=201)
+        
     except Exception as e:
         return Response({'error': str(e)}, status=500)
 
