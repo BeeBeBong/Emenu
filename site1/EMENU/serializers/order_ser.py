@@ -14,14 +14,14 @@ class OrderItemSerializer(serializers.ModelSerializer):
         model = OrderItem
         fields = ['id', 'product_id', 'name', 'price', 'quantity', 'note', 'isServed', 'image']
 
-    def get_image(self, obj):
+    def get_img(self, obj):
         try:
-            if obj.item and obj.item.image:
-                req = self.context.get('request')
-                return req.build_absolute_uri(obj.item.image.url) if req else obj.item.image.url
+            if obj.image:
+                # Chỉ trả về '/media/menu/anh.jpg'
+                # KHÔNG trả về http://localhost... hay http://ngrok...
+                return obj.image.url 
         except: pass
         return ""
-
 class OrderSerializer(serializers.ModelSerializer):
     id = serializers.IntegerField(source='id_donhang', read_only=True)
     tableId = serializers.IntegerField(source='table.pk', read_only=True)

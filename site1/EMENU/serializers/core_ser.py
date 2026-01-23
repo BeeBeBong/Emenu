@@ -41,18 +41,22 @@ class CategorySerializer(serializers.ModelSerializer):
 class ItemSerializer(serializers.ModelSerializer):
     category_name = serializers.SerializerMethodField()
     img = serializers.SerializerMethodField() 
-    class Meta: model = Item; fields = ['id', 'name', 'price', 'category_name', 'img', 'category']
-    def get_category_name(self, obj): return obj.category.name if obj.category else "Khác"
+
+    class Meta:
+        model = Item
+        fields = ['id', 'name', 'price', 'category_name', 'img', 'category']
+
+    def get_category_name(self, obj):
+        return obj.category.name if obj.category else "Khác"
+
     def get_img(self, obj):
         try:
             if obj.image:
-                request = self.context.get('request')
-                if request:
-                    return request.build_absolute_uri(obj.image.url)
-                return obj.image.url
+                # Chỉ trả về '/media/menu/anh.jpg'
+                # KHÔNG trả về http://localhost... hay http://ngrok...
+                return obj.image.url 
         except: pass
         return ""
-
 class ProductFormSerializer(serializers.ModelSerializer):
     category = serializers.CharField()
     image = FlexibleImageField(required=False, allow_null=True)
