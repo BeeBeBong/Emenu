@@ -49,13 +49,33 @@ def get_dashboard_stats(request):
             except: continue
 
         bookings = Booking.objects.filter(status='pending').order_by('-created_at')[:10]
-        bookings_data = [{"id": b.id, "customer_name": b.customer_name, "phone": b.customer_phone, "time": b.booking_time, "guests": b.guest_count, "status": b.status} for b in bookings]
+        bookings_data = []
+        
+        for b in bookings:
+            # 1. Format ngày giờ thành dd/mm/yyyy HH:MM
+            # Lưu ý: Cần import method strftime nếu chưa có (thực ra nó thuộc về datetime object có sẵn)
+            fmt_time = b.booking_time.strftime("%d/%m/%Y %H:%M") if b.booking_time else ""
+            
+            bookings_data.append({
+                "id": b.id,
+                "customer_name": b.customer_name,
+                "name": b.customer_name,  # <--- THÊM DÒNG NÀY: Để Frontend hiển thị được cột "Tên khách"
+                "phone": b.customer_phone,
+                "time": fmt_time,         # <--- SỬA DÒNG NÀY: Trả về ngày giờ đã format dễ đọc
+                "guests": b.guest_count,
+                "status": b.status
+            })
+        # --------------------
 
         return Response({
             "revenue": {"total": total_rev, "cash": cash_rev, "transfer": transfer_rev, "orders": revenues.count()},
-            "best_sellers": best_sellers, "bookings": bookings_data
+            "best_sellers": best_sellers, 
+            "bookings": bookings_data # Trả về data mới đã sửa
         })
-    except Exception as e: return Response({'error': str(e)}, 500)
+        
+    except Exception as e:
+        print("Lỗi Dashboard:", e)
+        return Response({'error': str(e)}, status=500)
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
