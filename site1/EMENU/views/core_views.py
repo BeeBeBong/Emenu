@@ -9,7 +9,6 @@ from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from ..models import Category, Item
 from ..serializers import LoginSerializer, CategorySerializer, ItemSerializer, ProductFormSerializer
-
 def get_Emenu(request): return render(request, 'Emenu.html')
 
 @api_view(['POST'])
@@ -136,3 +135,4 @@ def get_menu_by_category(request, id_danhmuc):
         return Response(serializer.data)
     except Exception:
         return Response([], status=200)
+    
